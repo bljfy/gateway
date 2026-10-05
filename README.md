@@ -26,6 +26,7 @@ bash scripts/bootstrap.sh
 - [公共接口](docs/interfaces.md)：数据结构、调用边界和扩展约定。
 - [安全协议与 A 线交付](docs/protocol.md)：线格式、原生库重建、会话使用和实测范围。
 - [实现方案与开发计划](docs/implementation_plan.md)：安全设计、三线计划及验收条件。
+- [使用说明](docs/usage.md)：确定性模拟器与业务层编程接口。
 - [Agent 入口](AGENT.md)：按任务定位编码、测试、依赖及 CI/CD 规范。
 
 源码在 `src/`，测试在 `test/`，设计与规范在 `docs/`。GmSSL 固定为 3.1.1、官方绑定为 `gmssl-python==2.2.2`；初始化仅在 checkout 内构建库并验证，不启动真实服务或部署。Windows 已完成 A 线验证，Linux 与云端 CI 运行结果待验证，最终三程序验收由后续集成完成。

@@ -30,6 +30,7 @@ files = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["test"]
 addopts = "--strict-markers"
+pythonpath = ["."]
 cache_dir = ".tools/pytest-cache"
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
