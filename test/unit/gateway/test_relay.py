@@ -20,8 +20,10 @@ from gateway.contracts import (
     InferenceService,
     PeerIdentity,
     PeerRole,
+    ProtocolError,
     RecordHeader,
     RecordType,
+    SessionClosedError,
     SessionState,
     VerifiedRecord,
 )
@@ -54,6 +56,7 @@ class Session:
         self.closed = asyncio.Event()
         self.sent_event = asyncio.Event()
         self.send_gate = None
+        self.send_started = asyncio.Event()
         self.recv_count = 0
         self.close_started = asyncio.Event()
         self.close_gate = None
@@ -62,8 +65,16 @@ class Session:
         raise AssertionError("manager already authenticates")
 
     async def send(self, record_type, plaintext, *, request_id, chunk_index=0, end_of_message=True):
-        if self.send_gate is not None:
-            await self.send_gate.wait()
+        if self.state is SessionState.CLOSED:
+            raise ProtocolError("session closed")
+        self.send_started.set()
+        try:
+            if self.send_gate is not None:
+                await self.send_gate.wait()
+        except BaseException:
+            self.state = SessionState.CLOSED
+            self.closed.set()
+            raise
         self.sent.append((record_type, plaintext, request_id, chunk_index, end_of_message))
         self.sent_event.set()
         if self.echo and end_of_message:
@@ -238,6 +249,181 @@ async def test_cancel_stops_upstream_and_allows_next_request():
     await asyncio.wait_for(inbound.sent_event.wait(), 2)
     await stop(inbound, task)
     assert len(manager.opened) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("upstream_heartbeat", [False, True])
+async def test_heartbeat_preserves_request_and_response(upstream_heartbeat):
+    upstream = Session(UPSTREAM)
+    inbound, _, audit, _, _, task = setup(upstream=upstream)
+    identifier = uuid4()
+    heartbeat = record(UUID(int=0), b"", kind=RecordType.HEARTBEAT)
+    if not upstream_heartbeat:
+        inbound.incoming.put_nowait(heartbeat)
+    inbound.incoming.put_nowait(record(identifier))
+    await asyncio.wait_for(upstream.sent_event.wait(), 2)
+    if upstream_heartbeat:
+        upstream.incoming.put_nowait(
+            replace(
+                heartbeat,
+                header=replace(heartbeat.header, direction=Direction.ACCEPTOR_TO_INITIATOR),
+            )
+        )
+    upstream.incoming.put_nowait(record(identifier, b"ok", kind=RecordType.RESPONSE))
+    await asyncio.wait_for(inbound.sent_event.wait(), 2)
+    await stop(inbound, task)
+    assert inbound.sent[0][1] == b"ok"
+    lines = []
+    audit.drain(lines.append)
+    assert not any("protocol_rejected" in line for line in lines)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["id", "payload", "index", "final"])
+async def test_invalid_heartbeat_is_still_rejected(invalid):
+    inbound, _, audit, _, _, task = setup()
+    heartbeat = record(UUID(int=0), b"", kind=RecordType.HEARTBEAT)
+    if invalid == "id":
+        heartbeat = replace(heartbeat, header=replace(heartbeat.header, request_id=uuid4()))
+    elif invalid == "payload":
+        heartbeat = replace(heartbeat, plaintext=b"invalid")
+    elif invalid == "index":
+        heartbeat = replace(heartbeat, header=replace(heartbeat.header, chunk_index=1))
+    else:
+        heartbeat = replace(heartbeat, header=replace(heartbeat.header, end_of_message=False))
+    inbound.incoming.put_nowait(heartbeat)
+    await asyncio.wait_for(task, 2)
+    lines = []
+    audit.drain(lines.append)
+    assert any("protocol_rejected" in line for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_heartbeats_do_not_extend_request_deadline():
+    inbound, _, _, _, _, task = setup(limits=replace(Limits(), request_timeout_seconds=1))
+    inbound.incoming.put_nowait(record(uuid4(), b"first", final=False))
+    async with asyncio.timeout(2):
+        while not task.done():
+            inbound.incoming.put_nowait(record(UUID(int=0), b"", kind=RecordType.HEARTBEAT))
+            await asyncio.sleep(0.02)
+    await task
+    assert inbound.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_authenticated_close_does_not_consume_security_capacity():
+    audit = PrivacyAudit(security_capacity=1)
+    inbound, manager, _, server, _, task = setup(audit=audit)
+    for _ in range(3):
+        inbound.incoming.put_nowait(SessionClosedError("peer closed session"))
+        await asyncio.wait_for(task, 2)
+        assert audit.queued == 0 and not server._audit_failed
+        inbound = Session(PeerIdentity("authenticated-client", PeerRole.CLIENT))
+        manager.inbound = inbound
+        task = asyncio.create_task(server.handle(asyncio.StreamReader(), Writer()))
+    inbound.incoming.put_nowait(record(uuid4()))
+    await asyncio.wait_for(inbound.sent_event.wait(), 2)
+    await stop(inbound, task)
+    assert len(manager.opened) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_send_preserves_concurrent_and_subsequent_requests():
+    inbound, manager, _, _, _, task = setup()
+    inbound.send_gate = asyncio.Event()
+    first, second, third = uuid4(), uuid4(), uuid4()
+    inbound.incoming.put_nowait(record(first))
+    await asyncio.wait_for(inbound.send_started.wait(), 2)
+    inbound.incoming.put_nowait(record(second))
+    inbound.incoming.put_nowait(record(first, b"", kind=RecordType.CANCEL))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert inbound.state is SessionState.ACTIVE
+    inbound.send_gate.set()
+    async with asyncio.timeout(2):
+        while not any(sent[2] == second for sent in inbound.sent):
+            await asyncio.sleep(0)
+    inbound.incoming.put_nowait(record(third))
+    async with asyncio.timeout(2):
+        while not any(sent[2] == third for sent in inbound.sent):
+            await asyncio.sleep(0)
+    assert inbound.state is SessionState.ACTIVE
+    await stop(inbound, task)
+    assert len(manager.opened) == 3 and all(session.closed.is_set() for session in manager.opened)
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancel_drains_one_send_without_orphaning_it():
+    inbound = Session(PeerIdentity("authenticated-client", PeerRole.CLIENT))
+    inbound.send_gate = asyncio.Event()
+    server = GatewayServer(Manager(inbound), GatewayConfig(UPSTREAM), PrivacyAudit())
+    sending = asyncio.create_task(
+        server._send_response(
+            inbound,
+            record(uuid4(), kind=RecordType.RESPONSE),
+            asyncio.get_running_loop().time() + 2,
+            set(),
+        )
+    )
+    await asyncio.wait_for(inbound.send_started.wait(), 1)
+    sending.cancel()
+    await asyncio.sleep(0)
+    sending.cancel()
+    await asyncio.sleep(0)
+    assert not sending.done() and inbound.state is SessionState.ACTIVE
+    inbound.send_gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(sending, 1)
+    assert len(inbound.sent) == 1 and inbound.state is SessionState.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_cancelled_send_still_has_a_hard_deadline():
+    inbound = Session(PeerIdentity("authenticated-client", PeerRole.CLIENT))
+    inbound.send_gate = asyncio.Event()
+    server = GatewayServer(Manager(inbound), GatewayConfig(UPSTREAM), PrivacyAudit())
+    sending = asyncio.create_task(
+        server._send_response(
+            inbound,
+            record(uuid4(), kind=RecordType.RESPONSE),
+            asyncio.get_running_loop().time() + 0.1,
+            set(),
+        )
+    )
+    await asyncio.wait_for(inbound.send_started.wait(), 1)
+    sending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(sending, 1)
+    assert inbound.closed.is_set() and not inbound.sent
+
+
+@pytest.mark.asyncio
+async def test_cancel_drain_does_not_delay_an_earlier_incomplete_request_deadline():
+    inbound, _, _, _, _, task = setup(limits=replace(Limits(), request_timeout_seconds=1))
+    inbound.send_gate = asyncio.Event()
+    inbound.incoming.put_nowait(record(uuid4(), b"first", final=False))
+    await asyncio.sleep(0.6)
+    identifier = uuid4()
+    inbound.incoming.put_nowait(record(identifier))
+    await asyncio.wait_for(inbound.send_started.wait(), 0.2)
+    inbound.incoming.put_nowait(record(identifier, b"", kind=RecordType.CANCEL))
+    await asyncio.wait_for(task, 0.7)
+    assert inbound.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_interrupts_a_cancelled_blocked_response_send():
+    inbound, _, _, server, writer, task = setup()
+    inbound.send_gate = asyncio.Event()
+    identifier = uuid4()
+    inbound.incoming.put_nowait(record(identifier))
+    await asyncio.wait_for(inbound.send_started.wait(), 1)
+    inbound.incoming.put_nowait(record(identifier, b"", kind=RecordType.CANCEL))
+    for _ in range(20):
+        await asyncio.sleep(0)
+    await asyncio.wait_for(server.close(), 1)
+    assert task.cancelled() and writer.closed and inbound.closed.is_set()
+    assert server._outbound == server._active == 0 and not server._connections
 
 
 @pytest.mark.asyncio

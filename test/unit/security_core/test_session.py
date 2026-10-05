@@ -10,6 +10,8 @@ from uuid import uuid4
 import pytest
 
 import gateway.session.core as core
+from gateway.audit import PrivacyAudit
+from gateway.config import GatewayConfig
 from gateway.contracts import (
     AuthenticationError,
     CapacityError,
@@ -21,6 +23,7 @@ from gateway.contracts import (
     RecordHeader,
     RecordType,
     SecureSession,
+    SessionClosedError,
     SessionExpiredError,
     SessionManager,
     SessionPolicy,
@@ -28,6 +31,7 @@ from gateway.contracts import (
 )
 from gateway.crypto import GmSSLBackend
 from gateway.protocol import HEADER, ZERO_REQUEST, encode_header, write_frame
+from gateway.server import GatewayServer
 from gateway.session import LocalIdentity, SecuritySession, SecuritySessionManager, TrustRecord
 
 
@@ -476,9 +480,77 @@ async def test_active_receiver_acknowledges_close(backend: GmSSLBackend) -> None
         receive = asyncio.create_task(server.recv())
         await asyncio.sleep(0)
         await client.close()
-        with pytest.raises(ProtocolError, match="peer closed"):
+        with pytest.raises(SessionClosedError, match="peer closed"):
             await receive
         assert client.state is server.state is SessionState.CLOSED
+
+
+@pytest.mark.asyncio
+async def test_relay_consumes_real_heartbeat_and_authenticated_close(backend: GmSSLBackend) -> None:
+    async with link(backend) as pair:
+        client, server = await pair.connect()
+        audit = PrivacyAudit(security_capacity=1)
+        relay = GatewayServer(
+            pair.server, GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR)), audit
+        )
+        serving = asyncio.create_task(relay._serve(server))
+        await client.send(RecordType.HEARTBEAT, b"", request_id=ZERO_REQUEST)
+        await client.close()
+        await asyncio.wait_for(serving, 1)
+        assert client.state is server.state is SessionState.CLOSED
+        assert audit.queued == 0 and not relay._audit_failed
+
+
+@pytest.mark.asyncio
+async def test_relay_cancellation_preserves_real_secure_send(
+    backend: GmSSLBackend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with link(backend) as pair:
+        client, server = await pair.connect()
+        relay = GatewayServer(
+            pair.server,
+            GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR)),
+            PrivacyAudit(),
+        )
+        identifier = uuid4()
+        await client.send(RecordType.REQUEST, b"synthetic", request_id=identifier)
+        request = await server.recv()
+        response = replace(
+            request,
+            header=replace(
+                request.header,
+                record_type=RecordType.RESPONSE,
+                direction=Direction.ACCEPTOR_TO_INITIATOR,
+            ),
+        )
+        reached, release = asyncio.Event(), asyncio.Event()
+        original = core.write_frame
+
+        async def pause_send(writer: asyncio.StreamWriter, data: bytes) -> None:
+            if writer is server.writer and not release.is_set():
+                reached.set()
+                await release.wait()
+            await original(writer, data)
+
+        monkeypatch.setattr(core, "write_frame", pause_send)
+        sending = asyncio.create_task(
+            relay._send_response(server, response, asyncio.get_running_loop().time() + 2, set())
+        )
+        try:
+            await asyncio.wait_for(reached.wait(), 1)
+            sending.cancel()
+            await asyncio.sleep(0)
+            sending.cancel()
+            await asyncio.sleep(0)
+            assert server.state is SessionState.ACTIVE and not sending.done()
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(sending, 1)
+        assert (await client.recv()).plaintext == b"synthetic"
+        assert client.state is server.state is SessionState.ACTIVE
+        await client.send(RecordType.REQUEST, b"next", request_id=uuid4())
+        assert (await server.recv()).plaintext == b"next"
 
 
 @pytest.mark.asyncio

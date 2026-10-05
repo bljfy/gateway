@@ -31,6 +31,8 @@ DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反�
 
 错误分为 `AuthenticationError`、`SessionExpiredError`、`ProtocolError` 和 `CapacityError`，均继承 `GatewayError`。认证失败或写入失败使当前会话不可继续业务；取消应清理关联任务和资源，保留 `asyncio.CancelledError` 的传播语义。`close()` 可重复调用。
 
+`SessionClosedError` 是兼容契约 1.0 的新增 `ProtocolError` 子类，仅表示认证 CLOSE/CLOSE_ACK 已完成并清理。消费者先单独处理此类型，再处理真正协议错误；不能依据异常文本或 CLOSED 状态推断正常关闭。共享会话的 `send()` 一旦开始，不应随单个请求取消而中断；业务层须在原请求截止内等待该条发送结束，并保留取消传播及资源清理。
+
 SM4-GCM 后端的 `seal_sm4_gcm` 返回密文与 16 字节标签拼接，`open_sm4_gcm` 必须先完成认证才返回完整明文，否则抛出 `AuthenticationError`。SM2 密钥、签名和密文的字节编码由 A 在 `docs/protocol.md` 固定并提供互操作测试；B、C 不直接调用这些原始密码接口。
 
 `stream()` 是返回 `AsyncIterator[InferenceChunk]` 的普通方法；实现可使用异步生成器。连续分片从 0 开始，必须有且只有一个末尾结束分片。未实现扩展时明确抛出 `NotImplementedError`，不返回伪成功流。

@@ -22,6 +22,7 @@ from gateway.contracts import (
     RecordHeader,
     RecordType,
     SecureSession,
+    SessionClosedError,
     SessionExpiredError,
     SessionPolicy,
     SessionState,
@@ -501,13 +502,13 @@ class SecuritySession:
                     await self._send(RecordType.CLOSE_ACK, b"", ZERO_REQUEST, 0, True)
                     self._abort()
                     self._ack.set()
-                    raise ProtocolError("peer closed session")
+                    raise SessionClosedError("peer closed session")
                 if kind is RecordType.CLOSE_ACK:
                     if not self._close_sent:
                         raise ProtocolError("unexpected close acknowledgement")
                     self._ack.set()
                     self._abort()
-                    raise ProtocolError("session closed")
+                    raise SessionClosedError("session closed")
                 return record
         except TimeoutError:
             self._abort()

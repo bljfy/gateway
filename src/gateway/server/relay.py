@@ -16,6 +16,7 @@ from gateway.contracts import (
     ProtocolError,
     RecordType,
     SecureSession,
+    SessionClosedError,
     SessionManager,
     SessionState,
     VerifiedRecord,
@@ -31,6 +32,7 @@ class _Request:
     size: int = 0
     payload_size: int = 0
     task: asyncio.Task[None] | None = None
+    cancelled: bool = False
 
 
 class GatewayServer:
@@ -142,6 +144,7 @@ class GatewayServer:
 
     async def _serve(self, inbound: SecureSession) -> None:
         requests: dict[UUID, _Request] = {}
+        sending: set[asyncio.Task[None]] = set()
         send_lock = asyncio.Lock()
         receiving: asyncio.Task[VerifiedRecord] | None = None
         queued = 0
@@ -166,12 +169,16 @@ class GatewayServer:
                 for request_id, finished in list(requests.items()):
                     if finished.task in done:
                         assert finished.task is not None
-                        finished.task.result()
+                        if not (finished.cancelled and finished.task.cancelled()):
+                            finished.task.result()
                         queued -= finished.size
                         del requests[request_id]
                 if receiving not in done:
                     continue
-                record = receiving.result()
+                try:
+                    record = receiving.result()
+                except SessionClosedError:
+                    return
                 receiving = None
                 header = record.header
                 if header.direction is not Direction.INITIATOR_TO_ACCEPTOR:
@@ -180,20 +187,25 @@ class GatewayServer:
                     raise CapacityError("record limit exceeded")
                 if header.record_type is RecordType.CLOSE:
                     return
+                if header.record_type is RecordType.HEARTBEAT:
+                    self._check_heartbeat(record)
+                    continue
                 if header.record_type is RecordType.CANCEL:
                     if record.plaintext or header.chunk_index or not header.end_of_message:
                         raise ProtocolError("invalid cancellation")
-                    cancelled = requests.pop(header.request_id, None)
+                    cancelled = requests.get(header.request_id)
                     if cancelled is not None:
                         if cancelled.task is not None:
-                            cancelled.task.cancel()
-                            await asyncio.gather(cancelled.task, return_exceptions=True)
+                            if not cancelled.cancelled:
+                                cancelled.cancelled = True
+                                cancelled.task.cancel()
                         else:
                             self._publish(
                                 AuditEvent("request_finished", "cancelled", cancelled.audit_id),
                                 terminal=True,
                             )
-                        queued -= cancelled.size
+                            queued -= cancelled.size
+                            del requests[header.request_id]
                     continue
                 if header.record_type is not RecordType.REQUEST or header.request_id.int == 0:
                     raise ProtocolError("expected request")
@@ -224,9 +236,15 @@ class GatewayServer:
                 item.payload_size += len(record.plaintext)
                 queued += cost
                 if header.end_of_message:
-                    item.task = asyncio.create_task(self._forward(inbound, item, send_lock))
+                    item.task = asyncio.create_task(
+                        self._forward(inbound, item, send_lock, sending)
+                    )
         finally:
             tasks: list[asyncio.Task[object]] = []
+            # Whole-connection teardown no longer needs to preserve shared sends.
+            for send in sending:
+                send.cancel()
+                tasks.append(send)
             if receiving is not None:
                 receiving.cancel()
                 tasks.append(receiving)
@@ -241,7 +259,66 @@ class GatewayServer:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _forward(self, inbound: SecureSession, item: _Request, lock: asyncio.Lock) -> None:
+    @staticmethod
+    def _check_heartbeat(record: VerifiedRecord) -> None:
+        header = record.header
+        if (
+            record.plaintext
+            or header.request_id.int != 0
+            or header.chunk_index != 0
+            or not header.end_of_message
+        ):
+            raise ProtocolError("invalid heartbeat")
+
+    async def _send_response(
+        self,
+        inbound: SecureSession,
+        response: VerifiedRecord,
+        deadline: float,
+        owned: set[asyncio.Task[None]],
+    ) -> None:
+        # A cancels the whole session if send is interrupted. Drain this one frame
+        # before propagating request cancellation, retaining the shared send lock.
+        async def send() -> None:
+            async with asyncio.timeout_at(deadline):
+                await inbound.send(
+                    RecordType.RESPONSE,
+                    response.plaintext,
+                    request_id=response.header.request_id,
+                    chunk_index=response.header.chunk_index,
+                    end_of_message=response.header.end_of_message,
+                )
+
+        sending = asyncio.create_task(send())
+        owned.add(sending)
+        cancelled = False
+        try:
+            while True:
+                try:
+                    await asyncio.shield(sending)
+                    break
+                except asyncio.CancelledError:
+                    cancelled = True
+                    if sending.done():
+                        break
+                except Exception:
+                    if cancelled:
+                        raise asyncio.CancelledError from None
+                    raise
+            if cancelled:
+                if not sending.cancelled():
+                    sending.exception()
+                raise asyncio.CancelledError
+        finally:
+            owned.discard(sending)
+
+    async def _forward(
+        self,
+        inbound: SecureSession,
+        item: _Request,
+        lock: asyncio.Lock,
+        sending: set[asyncio.Task[None]],
+    ) -> None:
         upstream: SecureSession | None = None
         reserved = False
         started = monotonic()
@@ -282,6 +359,11 @@ class GatewayServer:
                 while True:
                     response = await upstream.recv()
                     header = response.header
+                    if header.direction is not Direction.ACCEPTOR_TO_INITIATOR:
+                        raise ProtocolError("invalid upstream direction")
+                    if header.record_type is RecordType.HEARTBEAT:
+                        self._check_heartbeat(response)
+                        continue
                     if (
                         header.record_type is not RecordType.RESPONSE
                         or header.direction is not Direction.ACCEPTOR_TO_INITIATOR
@@ -297,13 +379,7 @@ class GatewayServer:
                     if response_size > self.config.limits.max_response_body_bytes:
                         raise CapacityError("response body limit exceeded")
                     async with lock:
-                        await inbound.send(
-                            RecordType.RESPONSE,
-                            response.plaintext,
-                            request_id=request_id,
-                            chunk_index=index,
-                            end_of_message=header.end_of_message,
-                        )
+                        await self._send_response(inbound, response, item.deadline, sending)
                     if header.end_of_message:
                         result = "ok"
                         self.metrics.increment("requests_completed")

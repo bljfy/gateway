@@ -101,7 +101,7 @@ manager 限制活跃及待建立总量、待建立量和密码执行并发。密
 
 进入寿命的轮换提前区间后状态为 DRAINING，允许已登记 UUID 的响应与排空，不接纳新请求。`rotate(outbound_session)` 建立全新握手后将原会话排空；新会话供调用者切换，新旧密钥、ID 和计数独立。轮换失败不延长旧期限；入站轮换由对端发起新连接。到达硬期限即关闭。
 
-`close()` 发出认证 CLOSE，等待认证 CLOSE_ACK 或同时关闭，最多等待配置的关闭超时；业务接收循环遇到 CLOSE 时发送 ACK、清理并抛出 `ProtocolError`。断连、错误记录、认证失败、预算用尽或取消均清理；`close()` 可重复调用。调用者应先停止 listener 接纳，再关闭 manager，最后等待 listener 完全关闭。
+`close()` 发出认证 CLOSE，等待认证 CLOSE_ACK 或同时关闭，最多等待配置的关闭超时；业务接收循环遇到 CLOSE 时发送 ACK、清理并抛出 `SessionClosedError`，收到预期 CLOSE_ACK 后也使用该类型。它继承 `ProtocolError`，保留现有异常捕获兼容性，消费者应先单独识别正常认证关闭，避免误记为协议拒绝。HEARTBEAT 由 `recv()` 交付，业务接收循环应消费它而不推进分片索引。断连、错误记录、认证失败、预算用尽或取消均清理；`close()` 可重复调用。调用者应先停止 listener 接纳，再关闭 manager，最后等待 listener 完全关闭。
 
 ## 验证记录
 

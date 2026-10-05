@@ -31,6 +31,10 @@ class ProtocolError(GatewayError):
     """The peer record violates the agreed protocol."""
 
 
+class SessionClosedError(ProtocolError):
+    """Authenticated CLOSE/CLOSE_ACK completed; not a protocol rejection."""
+
+
 class CapacityError(GatewayError):
     """A bounded resource cannot accept more work."""
 
@@ -233,7 +237,7 @@ class SecureSession(Protocol):
         ...
 
     async def recv(self) -> VerifiedRecord:
-        """Single-reader operation; verification failures raise and close the session."""
+        """Single reader; authenticated closure raises SessionClosedError after cleanup."""
         ...
 
     async def close(self) -> None:
