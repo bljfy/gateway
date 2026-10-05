@@ -224,6 +224,8 @@ src/gateway/
   server/       # 入站会话、业务路由、出站连接池
   simulator/    # 安全通信、确定性模拟推理、结果返回
   contracts.py  # 三线公共类型与接口
+  codec.py      # 业务载荷的确定性、版本化编码（请求/响应）
+  framing.py    # 逻辑消息在记录之间的分片与组装
   config.py
   audit.py
   metrics.py

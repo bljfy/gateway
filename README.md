@@ -25,6 +25,7 @@ bash scripts/bootstrap.sh
 - [开发指南](docs/developer_guide.md)：一键环境、三线职责、分支、接口使用及最终 merge。
 - [公共接口](docs/interfaces.md)：数据结构、调用边界和扩展约定。
 - [实现方案与开发计划](docs/implementation_plan.md)：安全设计、三线计划及验收条件。
+- [使用说明](docs/usage.md)：确定性模拟器与业务层编程接口。
 - [Agent 入口](AGENT.md)：按任务定位编码、测试、依赖及 CI/CD 规范。
 
 源码在 `src/`，测试在 `test/`，设计与规范在 `docs/`。环境初始化不安装尚未选定版本的 GmSSL 原生库，也不执行真实服务或生产部署；A 线负责后端验证，最终安全验收使用真实后端。
