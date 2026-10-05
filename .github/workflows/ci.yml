@@ -36,6 +36,23 @@ jobs:
       - name: Bootstrap Linux environment
         if: runner.os == 'Linux'
         run: bash scripts/bootstrap.sh --skip-checks
+      - name: Build and self-test pinned GmSSL
+        run: uv run --locked python -m gateway.crypto.build_native
+      - name: Configure Windows native loader
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $manifest = Get-Content .tools/gmssl/manifest.json -Raw | ConvertFrom-Json
+          "GMSSL_LIBRARY=$($manifest.library)" >> $env:GITHUB_ENV
+          "GMSSL_SHA256=$($manifest.sha256)" >> $env:GITHUB_ENV
+          Split-Path -Parent $manifest.library >> $env:GITHUB_PATH
+      - name: Configure Linux native loader
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "GMSSL_LIBRARY=$PWD/.tools/gmssl/lib/libgmssl.so.3.1" >> "$GITHUB_ENV"
+          echo "GMSSL_SHA256=$(sha256sum .tools/gmssl/lib/libgmssl.so.3.1 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/.tools/gmssl/lib" >> "$GITHUB_ENV"
       - run: uv run --locked ruff check src test scripts
       - run: uv run --locked ruff format --check src test scripts
       - run: uv run --locked mypy src scripts
