@@ -30,6 +30,9 @@ if ($LASTEXITCODE -ne 0 -or $taskVersionOutput -notmatch "^uv $([regex]::Escape(
 $taskPreviousDirectory = Get-Location
 $taskPreviousCache = $env:UV_CACHE_DIR
 $taskPreviousPython = $env:UV_PYTHON_INSTALL_DIR
+$taskPreviousPath = $env:PATH
+$taskPreviousLibrary = $env:GMSSL_LIBRARY
+$taskPreviousDigest = $env:GMSSL_SHA256
 try {
     Set-Location -LiteralPath $taskRoot
     $env:UV_CACHE_DIR = Join-Path $taskTools 'cache'
@@ -39,6 +42,15 @@ try {
     & $taskUv sync --locked --dev
     if ($LASTEXITCODE -ne 0) { throw 'Dependency sync failed.' }
     if (-not $SkipChecks) {
+        $taskManifestPath = Join-Path $taskTools 'gmssl/manifest.json'
+        if (-not (Test-Path -LiteralPath $taskManifestPath)) {
+            & $taskUv run --locked python -m gateway.crypto.build_native
+            if ($LASTEXITCODE -ne 0) { throw 'GmSSL build failed; install CMake and a C compiler or prepare the native manifest first.' }
+        }
+        $taskManifest = Get-Content -LiteralPath $taskManifestPath -Raw | ConvertFrom-Json
+        $env:GMSSL_LIBRARY = $taskManifest.library
+        $env:GMSSL_SHA256 = $taskManifest.sha256
+        $env:PATH = (Split-Path -Parent $taskManifest.library) + ';' + $env:PATH
         & $taskUv run --locked ruff check src test scripts
         if ($LASTEXITCODE -ne 0) { throw 'Ruff check failed.' }
         & $taskUv run --locked ruff format --check src test scripts
@@ -52,5 +64,8 @@ try {
 } finally {
     $env:UV_CACHE_DIR = $taskPreviousCache
     $env:UV_PYTHON_INSTALL_DIR = $taskPreviousPython
+    $env:PATH = $taskPreviousPath
+    $env:GMSSL_LIBRARY = $taskPreviousLibrary
+    $env:GMSSL_SHA256 = $taskPreviousDigest
     Set-Location -LiteralPath $taskPreviousDirectory
 }

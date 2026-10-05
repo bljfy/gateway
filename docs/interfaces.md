@@ -1,6 +1,6 @@
 # 公共接口约定
 
-接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。公共类型和 `Protocol` 已实现；协议编码、密码后端、服务与会话实现由三线补齐。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
+接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。A 线实现位于 `gateway.crypto`、`gateway.protocol`、`gateway.session`，工厂与线格式见 [protocol.md](protocol.md)；业务服务仍由 B、C 线补齐。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
 
 ## 三线边界
 

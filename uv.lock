@@ -56,9 +56,21 @@ wheels = [
 ]
 
 [[package]]
+name = "gmssl-python"
+version = "2.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bb/0c/4cfe1456608d1523a4db51e1204d73b7ec63f3c4c6530b6c153cccb5d2f4/gmssl_python-2.2.2.tar.gz", hash = "sha256:882537fbb70505236ae781d28f444e6dc35458d7b757c863e45080cc023f751c", size = 61230, upload-time = "2023-10-12T11:55:41.382Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/ce/68605e510b6c1812de5e7184685ca1148eb261ceebae9767ff8c939a4fe9/gmssl_python-2.2.2-py3-none-any.whl", hash = "sha256:b3e019c52dbb0551e0c1a9b2329488c3c6d706d8f26daff4eea25c3fa3a61972", size = 27312, upload-time = "2023-10-12T11:55:39.235Z" },
+]
+
+[[package]]
 name = "guomi-gateway"
 version = "0.1.0"
 source = { editable = "." }
+dependencies = [
+    { name = "gmssl-python" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -69,6 +81,7 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "gmssl-python", specifier = "==2.2.2" }]
 
 [package.metadata.requires-dev]
 dev = [
