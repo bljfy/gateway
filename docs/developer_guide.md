@@ -2,7 +2,7 @@
 
 ## 当前基线
 
-已建立公共接口、uv 锁文件、契约测试和检查流水线，A 线已提供真实密码后端及单链路安全会话。B、C 线业务程序尚未实现。公共接口说明见 [interfaces.md](interfaces.md)，安全模块工厂、使用方式及原生环境见 [protocol.md](protocol.md)，分工及最终合并条件见 [实现方案第 13 节](implementation_plan.md#13-实施顺序)。
+已整合 A 的真实密码与会话、B 的转发与隐私审计、C 的业务客户端和模拟服务，并提供三程序 CLI。公共接口见 [interfaces.md](interfaces.md)，原生环境见 [protocol.md](protocol.md)，启动见 [usage.md](usage.md)，实测与后续验收项见 [integration_report.md](integration_report.md)。三线分工保留在 [实现方案第 13 节](implementation_plan.md#13-实施顺序)。
 
 ## 一键准备环境
 
@@ -36,7 +36,7 @@ bash scripts/bootstrap.sh
 
 Linux 初始化的版本判断回归测试在 Ubuntu CI 中执行。Windows 本地验证该测试时，可将 `GATEWAY_TEST_BASH` 环境变量设为 Git Bash 的 `bash.exe` 绝对路径；未指定时跳过这组测试。测试使用临时目录中的工具替身，不下载或安装软件。
 
-该脚本部署开发环境。完整检查会构建并自测 GmSSL 3.1.1，需要 CMake 和 C 编译器；已有 `.tools/gmssl/manifest.json` 时复用经校验库。`SkipChecks` 仅同步 Python 环境。独立运行 pytest 前须按 [协议文档](protocol.md#原生环境) 设置 DLL 路径、`GMSSL_LIBRARY` 和 `GMSSL_SHA256`；Linux 另需 `LD_LIBRARY_PATH`。服务配置、密钥提供与部署入口由后续实现补齐；其条件及回滚见 [CI/CD 规范](ci_cd.md)。
+该脚本部署开发环境。完整检查会构建并自测 GmSSL 3.1.1，需要 CMake 和 C 编译器；已有 `.tools/gmssl/manifest.json` 时复用经校验库。`SkipChecks` 仅同步 Python 环境。独立运行 pytest 前须按 [协议文档](protocol.md#原生环境) 设置 DLL 路径、`GMSSL_LIBRARY` 和 `GMSSL_SHA256`；Linux 另需 `LD_LIBRARY_PATH`。本地服务配置与密钥生成见 [使用说明](usage.md)，回滚见 [部署说明](deployment.md)，生产发布条件见 [CI/CD 规范](ci_cd.md)。
 
 ## 三人开工
 
@@ -60,6 +60,6 @@ git worktree add -b codex/application-delivery .worktrees/application-delivery m
 
 ## CI 与交付产物
 
-CI 在 PR、`main` 推送或手动触发时构建固定 GmSSL、执行原生自测及 Python 安全核心检查，保存 JUnit 与安全用例 JSON。Windows 已本地验证；Linux 和 GitHub Actions 实际结果尚待流水线运行，不代表网关三程序验收完成。
+CI 在 PR、`main` 推送或手动触发时构建固定 GmSSL、执行原生自测、静态检查与全量非外部测试，保存 JUnit、安全核心和集成 JSON。Windows 三程序已本地验证；最终提交的 Linux 和 GitHub Actions 结果以实际流水线记录为准。
 
-`Delivery artifacts` 工作流由 `v*` 标签或手动触发，复用同一提交的 CI，校验标签版本，再构建 Python wheel 与源码包，保存锁文件、工具版本、提交 SHA 和 SHA256 校验清单。当前仅交付接口包，不向包仓库发布、不执行目标服务器部署；生产环境审批、原生库和回滚在服务实现后接入。流水线文件已提供，实际云端运行结果以 GitHub Actions 记录为准。
+`Delivery artifacts` 工作流由 `v*` 标签或手动触发，复用同一提交的 CI，校验标签版本，再构建 Python wheel 与源码包，保存锁文件、工具版本、提交 SHA 和 SHA256 校验清单。包包含三程序源码，原生库需单独构建；生产凭据和运行配置不进入产物。实际云端运行结果以 GitHub Actions 记录为准，生产部署需按 CI/CD 规范配置目标环境。

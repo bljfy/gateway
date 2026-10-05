@@ -1,6 +1,6 @@
 # 公共接口约定
 
-接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。A 线实现位于 `gateway.crypto`、`gateway.protocol`、`gateway.session`，工厂与线格式见 [protocol.md](protocol.md)；业务服务仍由 B、C 线补齐。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
+接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。安全层见 `gateway.crypto`、`gateway.protocol`、`gateway.session` 与 [protocol.md](protocol.md)；业务层见 `gateway.client`、`gateway.simulator`、`gateway.server`。真实工厂和角色入口由 `gateway.runtime` 接线。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
 
 ## 三线边界
 
@@ -27,6 +27,8 @@ DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反�
 
 业务载荷的线格式由 C 在 `src/gateway/codec.py` 统一编码（版本化、显式长度、拒绝尾随字节），请求可携带流式标志；`InferenceResponse` 的编码见该模块。逻辑消息跨记录的拆分与组装由 `src/gateway/framing.py` 提供，客户端与模拟服务端共用同一边界校验。
 
+编码后请求最多 1 MiB、普通响应最多 16 MiB，均包含编码头部；组装在保留下一片前检查字节与记录开销，拒绝空的非末片。运行配置可以降低限额。合法心跳不进入业务组装，非法控制记录拒绝。流式 UTF-8 解码支持字符跨记录边界。
+
 ## 会话与错误
 
 `handshake()` 在双向认证与密钥确认成功后进入 ACTIVE。`send()` 由会话内部原子分配序列和 nonce，调用者仅传记录类型、载荷、请求及分片标识；`recv()` 由单一接收器调用，完整认证后才交付明文。ACTIVE/DRAINING、硬期限和失败清理的完整行为遵循 [实现方案](implementation_plan.md#6-安全协议)。
@@ -38,6 +40,8 @@ DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反�
 SM4-GCM 后端的 `seal_sm4_gcm` 返回密文与 16 字节标签拼接，`open_sm4_gcm` 必须先完成认证才返回完整明文，否则抛出 `AuthenticationError`。SM2 密钥、签名和密文的字节编码由 A 在 `docs/protocol.md` 固定并提供互操作测试；B、C 不直接调用这些原始密码接口。
 
 `stream()` 是返回 `AsyncIterator[InferenceChunk]` 的普通方法；实现可使用异步生成器。连续分片从 0 开始，必须有且只有一个末尾结束分片。未实现扩展时明确抛出 `NotImplementedError`，不返回伪成功流。
+
+`InferenceClient` 将单会话调用串行化。提前关闭流、超时或异常会关闭会话并取消上游工作，调用者必须显式关闭未消费完的迭代器，再为后续请求建立新会话。正常完整调用可复用入站会话；网关每次请求建立独立上游会话。
 
 ## 变更与测试
 

@@ -46,10 +46,15 @@ def encode_request(request: InferenceRequest, *, stream: bool = False) -> bytes:
     model = request.model.encode("utf-8")
     if not 0 < len(model) <= MAX_MODEL_BYTES:
         raise ProtocolError("model byte length is out of bounds")
+    if len(request.retrieval_context) > MAX_CONTEXT_ITEMS:
+        raise ProtocolError("too many retrieval context items")
+    if (
+        len(request.prompt) > MAX_REQUEST_BODY_BYTES
+        or sum(len(item) for item in request.retrieval_context) > MAX_REQUEST_BODY_BYTES
+    ):
+        raise ProtocolError("request body exceeds the configured limit")
     prompt = request.prompt.encode("utf-8")
     context = [item.encode("utf-8") for item in request.retrieval_context]
-    if len(context) > MAX_CONTEXT_ITEMS:
-        raise ProtocolError("too many retrieval context items")
     if not 0 < request.max_output_tokens <= 0xFFFFFFFF:
         raise ProtocolError("max_output_tokens is out of bounds")
 
@@ -64,7 +69,7 @@ def encode_request(request: InferenceRequest, *, stream: bool = False) -> bytes:
         body += _U32.pack(len(item))
         body += item
     body += _U32.pack(request.max_output_tokens)
-    if len(body) > MAX_REQUEST_BODY_BYTES:
+    if len(body) + _HEADER.size > MAX_REQUEST_BODY_BYTES:
         raise ProtocolError("request body exceeds the configured limit")
 
     message_type = MessageType.STREAM_REQUEST if stream else MessageType.REQUEST
@@ -74,7 +79,7 @@ def encode_request(request: InferenceRequest, *, stream: bool = False) -> bytes:
 def decode_request(data: bytes) -> tuple[InferenceRequest, bool]:
     """Decode a request, returning the DTO and whether streaming was requested."""
     message_type = _read_header(data, MessageType.REQUEST, MessageType.STREAM_REQUEST)
-    if len(data) - _HEADER.size > MAX_REQUEST_BODY_BYTES:
+    if len(data) > MAX_REQUEST_BODY_BYTES:
         raise ProtocolError("request body exceeds the configured limit")
     offset = _HEADER.size
 
@@ -108,8 +113,10 @@ def decode_request(data: bytes) -> tuple[InferenceRequest, bool]:
 
 def encode_response(response: InferenceResponse) -> bytes:
     """Encode a complete inference response."""
+    if len(response.output) > MAX_RESPONSE_BODY_BYTES - 22:
+        raise ProtocolError("response output exceeds the configured limit")
     output = response.output.encode("utf-8")
-    if len(output) > MAX_RESPONSE_BODY_BYTES:
+    if len(output) + 22 > MAX_RESPONSE_BODY_BYTES:
         raise ProtocolError("response output exceeds the configured limit")
 
     body = bytearray()
@@ -121,6 +128,8 @@ def encode_response(response: InferenceResponse) -> bytes:
 
 def decode_response(data: bytes) -> InferenceResponse:
     """Decode a complete inference response."""
+    if len(data) > MAX_RESPONSE_BODY_BYTES:
+        raise ProtocolError("response body exceeds the configured limit")
     _read_header(data, MessageType.RESPONSE)
     offset = _HEADER.size
 

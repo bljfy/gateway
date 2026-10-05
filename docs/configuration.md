@@ -1,9 +1,7 @@
 # B 线：网关配置、转发与隐私审计
 
-本交付基于 `3516243a8fb48b79c975cac27c6c80b93734ac32`、公共契约 1.0。
-实现 `GatewayServer`、`ForwardingService`、`load_config`、`PrivacyAudit` 与本机 `/metrics`。
-测试使用 `test/unit/gateway/` 内的会话替身，仅证明 B 线调用边界、资源控制与隐私行为，
-不证明 SM2/SM4、身份认证、抗重放、真实全链路或性能目标已通过。
+公共契约为 1.0。实现 `GatewayServer`、`ForwardingService`、`load_config`、`PrivacyAudit` 与本机 `/metrics`，由 `gateway.runtime` 连接真实安全层及业务层。
+`test/unit/gateway/` 的会话替身用于验证 B 的边界；真实安全与三程序结果见 [整合报告](integration_report.md)。
 分工与合并流程见 [实现方案](implementation_plan.md#13-实施顺序)。
 
 ## 启动配置
@@ -50,6 +48,26 @@ max_plaintext_bytes_per_direction = 1073741824
 信任有效期和身份授权由 A 的可信 `SessionManager` 工厂解析。业务记录不能改变目标。
 配置只在重启时重建；没有热更新或跳过认证的运行选项。
 
+## 三角色运行配置
+
+`init-demo` 生成 `client.json`、`gateway.json`、`simulator.json`。每个 JSON 最多 64 KiB，拒绝未知字段、错误角色、重复信任身份和非法类型。路径相对 JSON 所在目录解析，也接受受运维控制的绝对路径。实际生成文件是可直接运行的配置示例。
+
+| 字段 | 内容 |
+| --- | --- |
+| `peer_id`、`role` | 本地身份和 `client` / `gateway` / `simulator` 角色，密钥版本固定为 1 |
+| `native_manifest` | 已校验原生库清单；`library` 和 `sha256` 必填，启动核对库哈希及版本 |
+| `signing_key`、`encryption_key` | 各自独立的加密 DER 私钥文件，每个最多 512 字节 |
+| `password_file` | 私钥导入口令文件，最多 1024 字节，按原始字节读取 |
+| `gateway_config` | 共享的上述 TOML，三端应用相同会话策略和业务限额 |
+| `host`、`port` | 本地监听地址；演示固定回环，端口范围 1–65535 |
+| `target` | 客户端指向信任表中的网关身份 |
+| `audit_file` | 网关本地审计 JSONL 文件，默认 `audit.jsonl` |
+| `trust` | 最多 64 个预置公钥身份，见下文 |
+
+每条信任记录包含 `peer_id`、`role`、`signing_public_key`、`encryption_public_key`（十六进制公钥）；出站目标另需 `host`、`port`。`enabled` 默认为 true，`expires_at` 为 Unix 秒时间戳，演示默认 4102444800；部署时设置实际有效期。客户端仅信任网关，模拟器仅信任网关，网关信任客户端与固定模拟器。业务请求不能修改信任表。口令文件与加密私钥同目录仅用于本地原型，生产密钥托管另行配置。
+
+原生线帧上限固定为 131072，运行加载器拒绝其他值；记录明文配置可降低至 1 字节，由客户端、网关、模拟器共同执行。演示将队列预算设为 2 MiB，以容纳最多 1 MiB 载荷及每片 128 字节的计费开销；大量小分片仍可能先触发队列预算。启动命令与原生加载环境见 [使用说明](usage.md)。
+
 ## 接线与职责
 
 由 C 的运行入口构造以下对象，将 `relay.handle` 注册到 `asyncio.start_server`：
@@ -67,7 +85,7 @@ metrics_server = await start_metrics_server(
 创建 manager 时必须同时传入 `config.session` 及线帧、方向字节预算等限制。
 契约 1.0 尚未定义 manager 工厂参数或剩余密钥寿命查询，B 不会自行模拟密码校验或延长期限。
 原生密码、线帧长度、序列/nonce、方向累计字节预算、密钥寿命与轮换硬截止必须在 A 内部执行。
-当前 B 未提供可独立启动的 CLI；真实启动与 A/C 集成后验收。
+CLI `gateway --config ...` 构造真实 manager、转发、审计输出和指标，关闭时统一清理；完整命令见使用说明。
 
 网关不解析 C 的业务编码，只转发可信 `recv()` 交付的请求/响应载荷；
 另提供 B 的 `ForwardingService`，实现公共 `InferenceService.complete()`：
@@ -79,7 +97,7 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 执行编码后载荷总长和记录限额，避免先接收无界输出再检查。manager 的关闭由运行入口负责。
 `ForwardingService.healthy` 在终结审计失败或上游关闭失败后置为 False 并阻止后续调用。
 记录头的请求标识、方向、类型、分片连续性和结束标志由 B 额外验证。
-这里的传输分片用于普通完整响应，并不宣称实现 token 流业务扩展。
+`GatewayServer` 同时转发完整响应与 C 的流式响应；`ForwardingService` 的 DTO 接口仍仅支持普通响应。
 
 每个请求使用新建的独立上游会话，仅向配置的身份发送，成功或失败后关闭。
 这是首版有界转发策略，尚未实现上游连接池复用。它避免跨请求单读者争用，代价是每次请求握手。
@@ -111,7 +129,7 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 安全事件使用独立容量，业务队列满不会占用安全保留位。
 事件常量见 `gateway.audit.EVENTS`、`SECURITY_EVENTS` 和 `RESULTS`。
 
-运行入口必须定期调用 `audit.drain(writer, limit=128)`；writer 接收以换行结束的 JSON，
+运行入口每 50 ms 调用 `audit.drain(writer, limit=128)`，停机排空剩余队列；writer 接收以换行结束的 JSON，
 应为可信、快速的本机输出函数。drain 是同步小批处理，慢存储需由运行入口安排独立输出方案。
 无人消费时会在队列满后拒绝新业务，不丢弃旧条目腾位置。
 写入异常保留未写条目、累计失败数、锁定 unhealthy，并拒绝后续 publish；重启恢复。
@@ -141,8 +159,8 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 每次执行 B 线测试在 `.tools/gateway-test-report.json` 写入用例、步骤、合成用例摘要、
 修改位置、预期、实际、耗时与判定；不收集异常文本或载荷。摘要用于标识测试参数组合，
 输入生成规则以对应测试源码为准。报告属于被忽略的本地运行产物。
-测试实测结果和独立 diff 审查结论随 PR 交付；真实后端、跨平台 CI、三程序安全测试、
-隐私审计性能对照与吞吐测试留待 C 集成，不填写未经测量的数值。
+测试实测结果和独立 diff 审查结论随交付记录；真实后端与三程序已纳入集成测试，
+跨平台 CI、隐私审计性能对照与吞吐测试状态见整合报告。
 
 PR [#1](https://github.com/bljfy/gateway/pull/1) 合并后的会话兼容修复于 2026-10-05 在
 Windows x86_64 / Python 3.12.11 / uv 0.8.22 / GmSSL 3.1.1 验证：
@@ -154,4 +172,4 @@ Windows x86_64 / Python 3.12.11 / uv 0.8.22 / GmSSL 3.1.1 验证：
 
 供 C 同步共享实现方案及 Unreleased 变更记录的摘要：新增 B 线配置加载、有界认证记录转发、
 超时取消及背压、白名单审计和回环指标；不修改公共契约、依赖锁文件或其他线路模块。
-本文件是 B 的交付入口；C 集成时需将此入口及实测结论同步到 README/开发指南。
+本文件维护运行配置与 B 的行为边界，README 和开发指南链接当前整合报告。
