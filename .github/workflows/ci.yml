@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.8.22"
+          python-version: "3.12.11"
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - name: Bootstrap Windows environment
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 -SkipChecks
+      - name: Bootstrap Linux environment
+        if: runner.os == 'Linux'
+        run: bash scripts/bootstrap.sh --skip-checks
+      - run: uv run --locked ruff check src test scripts
+      - run: uv run --locked ruff format --check src test scripts
+      - run: uv run --locked mypy src scripts
+      - run: uv run --locked pytest test/ -m "not e2e" --junitxml=artifacts/junit.xml
+      - run: git diff --check
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tests-${{ matrix.os }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 14

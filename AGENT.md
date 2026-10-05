@@ -14,6 +14,7 @@
 | 修改 CI、发布、部署或回滚流程 | [CI/CD 规范](docs/ci_cd.md) |
 | 确定功能范围、协议、架构或开发阶段 | [实现方案与开发计划](docs/implementation_plan.md) |
 | 核对题目要求 | [原始需求](docs/offical_request.md) |
+| 首次开工、初始化环境或了解三线协作 | [开发指南](docs/developer_guide.md) 与 [公共接口](docs/interfaces.md) |
 
 所引用的规范适用于对应任务，读取后再开展相关操作；文档中的链接可继续定位专项设计，无需每次加载全部文档。
 

@@ -1,0 +1,42 @@
+[project]
+name = "guomi-gateway"
+version = "0.1.0"
+description = "Shared contracts for a Python SM2/SM4 inference gateway"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[build-system]
+requires = ["uv_build==0.8.22"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "gateway"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+addopts = "--strict-markers"
+cache_dir = ".tools/pytest-cache"
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["e2e: explicitly authorized tests requiring external services or credentials"]
+
+[dependency-groups]
+dev = [
+    "mypy==2.4.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "ruff==0.16.10",
+]

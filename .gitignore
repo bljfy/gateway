@@ -5,3 +5,9 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+.tools/
+.mypy_cache/
+.ruff_cache/
+artifacts/
+dist/
+*.egg-info/
