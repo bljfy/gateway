@@ -26,7 +26,7 @@ if [[ ! -x "$task_uv" ]]; then
     tar -xzf .tools/uv.tar.gz -C .tools/uv --strip-components=1
 fi
 task_actual_version="$("$task_uv" --version)"
-if [[ "$task_actual_version" != "uv $task_uv_version "* ]]; then
+if [[ "$task_actual_version" != "uv $task_uv_version" && "$task_actual_version" != "uv $task_uv_version "* ]]; then
     printf 'Local uv version does not match .uv-version; remove .tools/uv and rerun.\n' >&2
     exit 1
 fi
