@@ -1,6 +1,6 @@
 # 使用说明
 
-本文件说明应用线路（C）已交付的业务层如何使用。密码后端、安全会话、网关转发与隐私审计由 A、B 线路在集成时补齐，因此当前只能直接运行确定性模拟器，三程序完整拓扑暂不能启动。
+本文件说明应用线路（C）已交付的业务层如何使用。密码后端、安全会话、网关转发与隐私审计已由 A、B 线路合入；三程序的集成命令行入口尚待补齐，当前可直接运行确定性模拟器。
 
 ## 环境
 
@@ -41,8 +41,8 @@ async for chunk in client.stream(request):
     ...
 ```
 
-模拟服务端的入站处理由 `InferenceSimulator.serve(session)` 提供：接收已认证请求、执行确定性推理并返回，遇到 `CLOSE` 记录时关闭会话。业务载荷的编码见 `src/gateway/codec.py`，记录分片与组装见 `src/gateway/framing.py`。
+模拟服务端的入站处理由 `InferenceSimulator.serve(session)` 提供：接收已认证请求、执行确定性推理并返回，认证关闭（`SessionClosedError`）或 `CLOSE` 记录时结束循环。业务载荷的编码见 `src/gateway/codec.py`，记录分片与组装见 `src/gateway/framing.py`。
 
 ## 尚未交付
 
-三程序完整链路（客户端—网关—模拟服务端）、真实 GmSSL 后端、网关转发与隐私审计在 A、B 线路交付后按 [实现方案第 13 节](implementation_plan.md#13-实施顺序) 集成并验收。当前不得将测试替身会话或确定性模拟器视为安全验证证据。
+三程序命令行入口与真实 GmSSL 后端构建（需 CMake 和 C 编译器）尚待集成验收；完整链路按 [实现方案第 13 节](implementation_plan.md#13-实施顺序) 执行。不得将测试替身会话或确定性模拟器视为安全验证证据。

@@ -74,3 +74,14 @@ async def test_stream_roundtrip_through_sessions() -> None:
     assert all(chunk.request_id == request.request_id for chunk in chunks)
     assert "".join(chunk.output for chunk in chunks).startswith("[mock:mock-model] ")
     await _finish(client_session, serve_task)
+
+
+@pytest.mark.asyncio
+async def test_serve_returns_gracefully_on_close() -> None:
+    client_session, simulator_session = connect_pair(CLIENT_PEER, SIMULATOR_PEER)
+    await client_session.handshake()
+    await simulator_session.handshake()
+    serve_task = asyncio.create_task(InferenceSimulator().serve(simulator_session))
+
+    await client_session.send(RecordType.CLOSE, b"", request_id=uuid4())
+    await serve_task

@@ -26,7 +26,7 @@ if [[ ! -x "$task_uv" ]]; then
     tar -xzf .tools/uv.tar.gz -C .tools/uv --strip-components=1
 fi
 task_actual_version="$("$task_uv" --version)"
-if [[ "$task_actual_version" != "uv $task_uv_version "* ]]; then
+if [[ "$task_actual_version" != "uv $task_uv_version" && "$task_actual_version" != "uv $task_uv_version "* ]]; then
     printf 'Local uv version does not match .uv-version; remove .tools/uv and rerun.\n' >&2
     exit 1
 fi
@@ -35,6 +35,13 @@ export UV_PYTHON_INSTALL_DIR="$task_root/.tools/python"
 "$task_uv" python install --no-bin "$task_python_version"
 "$task_uv" sync --locked --dev
 if [[ "$task_skip_checks" == false ]]; then
+    if [[ ! -f .tools/gmssl/manifest.json ]]; then
+        "$task_uv" run --locked python -m gateway.crypto.build_native
+    fi
+    export GMSSL_LIBRARY="$task_root/.tools/gmssl/lib/libgmssl.so.3.1"
+    export GMSSL_SHA256
+    GMSSL_SHA256="$("$task_uv" run --locked python -c 'import json; print(json.load(open(".tools/gmssl/manifest.json"))["sha256"])')"
+    export LD_LIBRARY_PATH="$task_root/.tools/gmssl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     "$task_uv" run --locked ruff check src test scripts
     "$task_uv" run --locked ruff format --check src test scripts
     "$task_uv" run --locked mypy src scripts

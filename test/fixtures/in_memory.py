@@ -16,6 +16,7 @@ from gateway.contracts import (
     ProtocolError,
     RecordHeader,
     RecordType,
+    SessionClosedError,
     SessionState,
     VerifiedRecord,
 )
@@ -80,7 +81,11 @@ class InMemorySession:
     async def recv(self) -> VerifiedRecord:
         if self._state is not SessionState.ACTIVE:
             raise ProtocolError("session is not active")
-        return await self._inbox.get()
+        record = await self._inbox.get()
+        if record.header.record_type in (RecordType.CLOSE, RecordType.CLOSE_ACK):
+            self._state = SessionState.CLOSED
+            raise SessionClosedError("peer closed session")
+        return record
 
     async def close(self) -> None:
         self._state = SessionState.CLOSED

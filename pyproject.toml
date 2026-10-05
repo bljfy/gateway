@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Shared contracts for a Python SM2/SM4 inference gateway"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "gmssl-python==2.2.2",
+]
 
 [build-system]
 requires = ["uv_build==0.8.22"]

@@ -1,6 +1,6 @@
 # 公共接口约定
 
-接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。公共类型和 `Protocol` 已实现；协议编码、密码后端、服务与会话实现由三线补齐。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
+接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。A 线实现位于 `gateway.crypto`、`gateway.protocol`、`gateway.session`，工厂与线格式见 [protocol.md](protocol.md)；业务服务仍由 B、C 线补齐。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
 
 ## 三线边界
 
@@ -32,6 +32,8 @@ DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反�
 `handshake()` 在双向认证与密钥确认成功后进入 ACTIVE。`send()` 由会话内部原子分配序列和 nonce，调用者仅传记录类型、载荷、请求及分片标识；`recv()` 由单一接收器调用，完整认证后才交付明文。ACTIVE/DRAINING、硬期限和失败清理的完整行为遵循 [实现方案](implementation_plan.md#6-安全协议)。
 
 错误分为 `AuthenticationError`、`SessionExpiredError`、`ProtocolError` 和 `CapacityError`，均继承 `GatewayError`。认证失败或写入失败使当前会话不可继续业务；取消应清理关联任务和资源，保留 `asyncio.CancelledError` 的传播语义。`close()` 可重复调用。
+
+`SessionClosedError` 是兼容契约 1.0 的新增 `ProtocolError` 子类，仅表示认证 CLOSE/CLOSE_ACK 已完成并清理。消费者先单独处理此类型，再处理真正协议错误；不能依据异常文本或 CLOSED 状态推断正常关闭。共享会话的 `send()` 一旦开始，不应随单个请求取消而中断；业务层须在原请求截止内等待该条发送结束，并保留取消传播及资源清理。
 
 SM4-GCM 后端的 `seal_sm4_gcm` 返回密文与 16 字节标签拼接，`open_sm4_gcm` 必须先完成认证才返回完整明文，否则抛出 `AuthenticationError`。SM2 密钥、签名和密文的字节编码由 A 在 `docs/protocol.md` 固定并提供互操作测试；B、C 不直接调用这些原始密码接口。
 

@@ -19,6 +19,7 @@ from gateway.contracts import (
     ProtocolError,
     RecordType,
     SecureSession,
+    SessionClosedError,
 )
 from gateway.framing import recv_message, send_message
 
@@ -44,43 +45,48 @@ class InferenceSimulator:
         return self._stream(request)
 
     async def serve(self, session: SecureSession) -> None:
-        """Run the inbound business loop over one ACTIVE session until CLOSE.
+        """Run the inbound business loop over one ACTIVE session until closure.
 
-        Control records other than CLOSE (heartbeat, cancel, error) are rejected;
-        graceful CLOSE_ACK and cancellation are reconciled once the security-core
-        line finalizes its session lifecycle.
+        Heartbeat records are skipped; an authenticated close (``SessionClosedError``)
+        or a CLOSE record ends the loop. Cancellation is reconciled once the
+        security-core line exposes stream cancellation to the business layer.
         """
         while True:
-            record = await session.recv()
-            if record.header.record_type is RecordType.CLOSE:
-                await session.close()
-                return
-            if record.header.record_type is not RecordType.REQUEST:
-                raise ProtocolError("simulator received an unexpected record type")
-            payload = await recv_message(
-                session,
-                record.header.request_id,
-                record_type=RecordType.REQUEST,
-                first=record,
-            )
-            request, stream = decode_request(payload)
-            if stream:
-                async for chunk in self.stream(request):
-                    await session.send(
-                        RecordType.RESPONSE,
-                        chunk.output.encode("utf-8"),
-                        request_id=request.request_id,
-                        chunk_index=chunk.index,
-                        end_of_message=chunk.is_final,
-                    )
-            else:
-                response = await self.complete(request)
-                await send_message(
+            try:
+                record = await session.recv()
+                if record.header.record_type is RecordType.CLOSE:
+                    await session.close()
+                    return
+                if record.header.record_type is RecordType.HEARTBEAT:
+                    continue
+                if record.header.record_type is not RecordType.REQUEST:
+                    raise ProtocolError("simulator received an unexpected record type")
+                payload = await recv_message(
                     session,
-                    RecordType.RESPONSE,
-                    encode_response(response),
-                    request_id=request.request_id,
+                    record.header.request_id,
+                    record_type=RecordType.REQUEST,
+                    first=record,
                 )
+                request, stream = decode_request(payload)
+                if stream:
+                    async for chunk in self.stream(request):
+                        await session.send(
+                            RecordType.RESPONSE,
+                            chunk.output.encode("utf-8"),
+                            request_id=request.request_id,
+                            chunk_index=chunk.index,
+                            end_of_message=chunk.is_final,
+                        )
+                else:
+                    response = await self.complete(request)
+                    await send_message(
+                        session,
+                        RecordType.RESPONSE,
+                        encode_response(response),
+                        request_id=request.request_id,
+                    )
+            except SessionClosedError:
+                return
 
     async def _stream(self, request: InferenceRequest) -> AsyncIterator[InferenceChunk]:
         output = self._output(request)
