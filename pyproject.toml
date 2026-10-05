@@ -38,7 +38,9 @@ markers = ["e2e: explicitly authorized tests requiring external services or cred
 
 [dependency-groups]
 dev = [
+    "cryptography==46.0.3",
     "mypy==2.4.0",
+    "psutil==7.1.0",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "ruff==0.16.10",

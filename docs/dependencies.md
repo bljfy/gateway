@@ -8,6 +8,7 @@
 - `.python-version` 固定默认 Python 补丁版本，uv 工具版本在环境说明与流水线中固定并保持一致。
 - 直接依赖使用明确版本，`uv.lock` 纳入 Git；每个 worktree 独立维护 `.venv`，虚拟环境不提交。
 - GmSSL 原生库另存平台、版本或提交、来源和校验值清单，并通过安装脚本重建；Python 锁文件不覆盖原生库。
+- 性能工具的开发依赖为 `cryptography==46.0.3`（临时 P-256 证书）与 `psutil==7.1.0`（进程 CPU/RSS），生产 `--no-dev` 不安装。版本与兼容范围核查依据 [cryptography 发布说明](https://cryptography.io/en/46.0.3/changelog/) 与 [psutil 文档](https://psutil.readthedocs.io/)；实验方法见 [性能对照](performance.md)。
 
 ## 依赖变更
 

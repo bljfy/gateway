@@ -30,6 +30,7 @@ bash scripts/bootstrap.sh
 - [配置说明](docs/configuration.md)：身份、公钥信任、资源限额、审计与指标。
 - [本地部署与回滚](docs/deployment.md)：演示环境生命周期与恢复步骤。
 - [整合报告](docs/integration_report.md)：来源提交、回归结果与剩余验收项。
+- [性能与 TLS 对照](docs/performance.md)：三进程实验、统计口径、复现命令与实测结果。
 - [Agent 入口](AGENT.md)：按任务定位编码、测试、依赖及 CI/CD 规范。
 
 源码在 `src/`，测试在 `test/`，设计与规范在 `docs/`。GmSSL 固定为 3.1.1、官方绑定为 `gmssl-python==2.2.2`；初始化在 checkout 内构建库并验证。Windows 已完成真实三程序测试；Linux、性能/TLS 对照和生产部署的验收状态见整合报告。
