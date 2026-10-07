@@ -30,6 +30,82 @@ Linux 使用 `.venv/bin/guomi-gateway demo --prompt "你好"`，先按 [原生�
 
 模拟响应先显示 UTC 时间戳和请求 UUID，再显示业务正文。终端默认显示服务启动、认证、转发与完成过程；使用 `guomi-gateway --quiet demo` 可隐藏过程日志。16 KiB 手动测试与响应校验见 [使用说明](docs/usage.md#16-kib-手动测试)。
 
+## 启动流程
+
+`demo` 自动管理服务生命周期；手动三程序启动后，可以重复执行 `client`。下面的命令均使用上文的平台入口。
+
+```mermaid
+flowchart TD
+    A["环境准备完成"] --> B{"选择启动方式"}
+
+    B --> D["guomi-gateway demo"]
+    D --> E{"演示配置目录存在？"}
+    E -- 否 --> F["prepare_demo<br/>生成身份、密钥与配置"]
+    E -- 是 --> G["load_runtime<br/>校验并加载三角色配置"]
+    F --> G
+    G --> H["启动 simulator<br/>等待就绪"]
+    H --> I["启动 gateway<br/>等待就绪"]
+    I --> J["run_client<br/>发送一次请求并显示响应"]
+    J --> K["关闭服务与会话<br/>排空审计、释放端口"]
+    H -- 启动失败 --> K
+    I -- 启动失败 --> K
+    J -- 请求失败 --> K
+
+    B --> M["首次执行 init-demo<br/>已有配置可跳过"]
+    M --> N["终端 1：simulator<br/>等待 simulator ready"]
+    N --> O["终端 2：gateway<br/>等待 gateway ready"]
+    O --> P["终端 3：client<br/>发送请求并显示响应"]
+    P --> Q["服务持续运行<br/>可以继续执行 client"]
+    Q --> P
+    Q --> R["服务终端按 Ctrl+C<br/>关闭服务、释放端口"]
+```
+
+手动服务已经运行时，使用 `client`。`demo` 会另外启动服务，使用相同端口会发生冲突。完整参数和停机方式见 [使用说明](docs/usage.md)。
+
+## 请求调用链（Call chain）
+
+客户端与网关、网关与模拟服务分别建立独立安全会话；网关验证收到的记录后，用另一段会话重新加密转发。
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CLI as 命令入口
+    participant C as 客户端
+    participant G as 网关
+    participant S as 模拟服务
+    participant A as 审计
+
+    CLI->>C: _client / _demo → run_client
+    C->>G: manager.open：连接网关
+    G->>G: GatewayServer.handle → manager.accept
+    Note over C,G: SM2 双向认证，建立安全会话 A
+
+    C->>C: complete / stream → encode_request
+    C->>G: send_message：SM4-GCM 加密 REQUEST
+    G->>G: _serve：验证记录、组装请求、检查限额
+    G->>A: publish：request_started
+
+    G->>S: _forward → manager.open
+    S->>S: manager.accept
+    Note over G,S: SM2 双向认证，建立独立安全会话 B
+
+    G->>S: 使用会话 B 加密转发 REQUEST
+    S->>S: serve → decode_request
+    S->>S: _respond_message → complete / stream
+    S->>S: _output：时间戳、请求 UUID、业务正文
+    S-->>G: SM4-GCM 加密 RESPONSE
+
+    G->>G: 验证响应、检查顺序与大小
+    G-->>C: _send_response：使用会话 A 重新加密
+    G->>A: 最后一片发送完成后 publish：request_finished
+    A->>A: runtime 定期 drain → audit.jsonl
+    C->>C: 普通响应解码 / 流式 UTF-8 解码
+    C-->>CLI: stdout 显示标识信息与正文
+    Note over G: stderr 显示认证、转发、完成等过程日志
+```
+
+流式响应按分片重复返回路径，直到最后一片；审计结束事件记录结果、耗时和字节数。`simulate` 是本地调用：`main → _simulate → InferenceSimulator.complete/stream → _output → stdout`，不会经过网关。
+
 ## 文档与协作
 
 - [开发指南](docs/developer_guide.md)：一键环境、三线职责、分支、接口使用及最终 merge。
