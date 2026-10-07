@@ -18,6 +18,7 @@ SOURCE_COMMIT = "d655c06b3a6b0fe8cff900f293bf0e5aac6eb0a2"
 
 
 def build(root: Path, cmake: str, ninja: str | None, compiler: str | None) -> Path:
+    """校验源码、构建并测试原生库，输出供运行时校验的 manifest。"""
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     archive = root / "source.zip"
@@ -27,11 +28,13 @@ def build(root: Path, cmake: str, ninja: str | None, compiler: str | None) -> Pa
             archive.open("wb") as output,
         ):
             shutil.copyfileobj(response, output)
+    # 下载文件和已存在的缓存都必须匹配固定摘要，不能仅凭文件名信任缓存。
     with archive.open("rb") as source:
         if hashlib.file_digest(source, "sha256").hexdigest() != SOURCE_SHA256:
             raise RuntimeError("GmSSL source checksum mismatch")
     with zipfile.ZipFile(archive) as package:
         for member in package.infolist():
+            # 解压前检查解析后的路径，拒绝越过工具目录的归档条目。
             if not (root / member.filename).resolve().is_relative_to(root):
                 raise RuntimeError("unsafe source archive path")
         package.extractall(root)
@@ -73,6 +76,7 @@ def build(root: Path, cmake: str, ninja: str | None, compiler: str | None) -> Pa
         ],
         check=True,
     )
+    # 使用同一 CMake 安装中的 ctest，验证 SM2/SM3/SM4 后再交付动态库。
     ctest = str(Path(cmake).with_name("ctest.exe" if os.name == "nt" else "ctest"))
     subprocess.run(
         [
@@ -106,6 +110,7 @@ def build(root: Path, cmake: str, ninja: str | None, compiler: str | None) -> Pa
         raise RuntimeError("unsupported build platform")
     with library.open("rb") as binary:
         digest = hashlib.file_digest(binary, "sha256").hexdigest()
+    # 同时记录源码来源和成品摘要；运行时按成品摘要核对实际加载的库。
     manifest = {
         "source_url": SOURCE_URL,
         "source_commit": SOURCE_COMMIT,

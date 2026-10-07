@@ -51,6 +51,7 @@ DEFAULT_POLICY = SessionPolicy()
 
 async def _await_completion[T](future: asyncio.Future[T]) -> T:
     """Drain owned work even under repeated cancellation, then propagate cancellation."""
+    # 取消协程不会停止已运行的原生线程；先收回任务，再向上层传播取消。
     cancelled = False
     while True:
         try:
@@ -72,6 +73,8 @@ async def _await_completion[T](future: asyncio.Future[T]) -> T:
 
 @dataclass(frozen=True, slots=True)
 class LocalIdentity:
+    """本地签名与解密身份；两种用途使用独立私钥，且 repr 不展示密钥。"""
+
     peer: PeerIdentity
     signing_private_key: bytes = field(repr=False)
     encryption_private_key: bytes = field(repr=False)
@@ -85,6 +88,8 @@ class LocalIdentity:
 
 @dataclass(frozen=True, slots=True)
 class TrustRecord:
+    """由本地配置提供的可信身份、公钥、有效期和可选出站地址。"""
+
     peer: PeerIdentity
     signing_public_key: bytes = field(repr=False)
     encryption_public_key: bytes = field(repr=False)
@@ -110,6 +115,8 @@ class TrustRecord:
 
 
 class SecuritySession:
+    """维护一段 TCP 连接的认证状态、双向记录序号和密钥使用预算。"""
+
     def __init__(
         self,
         manager: "SecuritySessionManager",
@@ -133,6 +140,7 @@ class SecuritySession:
         self._started = 0.0
         self._last_activity = 0.0
         self._lifetime = float(manager.policy.absolute_lifetime_seconds)
+        # 同方向读写各自串行：发送不能复用序号，接收不能由多个读者争抢帧。
         self._send_lock = asyncio.Lock()
         self._recv_lock = asyncio.Lock()
         self._handshake_lock = asyncio.Lock()
@@ -153,6 +161,7 @@ class SecuritySession:
         return self._state
 
     def _abort(self) -> None:
+        """立即撤销会话并释放登记；擦除本会话持有的可变密钥缓冲区。"""
         self._keys[:] = b"\x00" * len(self._keys)
         self._keys.clear()
         self._inflight.clear()
@@ -165,6 +174,7 @@ class SecuritySession:
             self._expiry_task.cancel()
 
     def _remaining(self) -> float:
+        # 会话计时使用单调时钟，取绝对寿命和空闲寿命中更早的截止时间。
         now = self.manager.clock()
         if not math.isfinite(now) or now < self._started or now < self._last_activity:
             self._abort()
@@ -175,6 +185,7 @@ class SecuritySession:
         )
 
     def _check(self, *, ready: bool = False) -> None:
+        # READY 是进入 ACTIVE 前的加密确认，只有握手内部可走此例外路径。
         if self.state not in (SessionState.ACTIVE, SessionState.DRAINING) and not (
             ready and self.state is SessionState.HANDSHAKING and self._ready_pending
         ):
@@ -188,6 +199,7 @@ class SecuritySession:
             self._state = SessionState.DRAINING
 
     async def _expire(self) -> None:
+        """即使没有业务读写，也按时进入 DRAINING 或关闭过期会话。"""
         try:
             while self.state in (SessionState.ACTIVE, SessionState.DRAINING):
                 remaining = self._remaining()
@@ -227,11 +239,13 @@ class SecuritySession:
             raise AuthenticationError("peer authentication failed")
 
     async def _mac(self, key: bytes, domain: bytes, transcript: bytes) -> bytes:
+        # 双方 Finished 使用不同域标签，避免将一个方向的确认反射到另一方向。
         return await self.manager._crypto(
             lambda: self.manager.backend.hmac_sm3(key, fields(domain, transcript))
         )
 
     async def handshake(self) -> None:
+        """完成身份认证、密钥确认和 READY 记录交换后才允许业务读写。"""
         async with self._handshake_lock:
             if self.state is SessionState.ACTIVE:
                 return
@@ -245,6 +259,8 @@ class SecuritySession:
                         material, transcript = await self._initiate()
                     else:
                         material, transcript = await self._accept()
+                    # 72 字节材料：双向 SM4 密钥各 16 字节，nonce 前缀各 4 字节，
+                    # Finished 的 HMAC 密钥 32 字节；会话只保留前 40 字节。
                     self._keys = bytearray(material[:40])
                     material[:] = b"\x00" * len(material)
                     self._started = self._last_activity = self.manager.clock()
@@ -260,6 +276,7 @@ class SecuritySession:
                         await self._send(RecordType.READY, transcript, ZERO_REQUEST, 0, True)
                     if self.manager._closed or self.writer.is_closing():
                         raise ProtocolError("session closed during handshake")
+                    # 握手期间信任可能过期，在公开 ACTIVE 会话前再次检查。
                     self.manager._trust(self.peer, outbound=self.initiator)
                     self._ready_pending = False
                     self._state = SessionState.ACTIVE
@@ -271,6 +288,7 @@ class SecuritySession:
                 raise
 
     async def _initiate(self) -> tuple[bytearray, bytes]:
+        """发起方：Hello → 验服务端签名 → 发送加密密钥 → 双向 Finished。"""
         trust = self.manager._trust(self.peer, outbound=True)
         nc = await self.manager._crypto(lambda: self.manager.backend.random_bytes(32))
         ch = b"\x01" + fields(
@@ -289,9 +307,11 @@ class SecuritySession:
             raise ProtocolError("unacceptable session lifetime")
         if not 1 <= hs_timeout <= self.manager.policy.handshake_timeout_seconds:
             raise ProtocolError("unacceptable handshake timeout")
+        # 签名覆盖客户端 Hello 摘要与服务端参数，将身份、随机数和会话参数绑定。
         await self._verify(trust, fields(b"server-hello", await self._hash(ch), body), signature)
         self.manager._reserve_id(sid)
         self.session_id, self._lifetime = sid, float(seconds)
+        # 发起方随机生成密钥材料，通过受信任的 SM2 加密公钥保护后传输。
         material = bytearray(
             await self.manager._crypto(lambda: self.manager.backend.random_bytes(72))
         )
@@ -306,6 +326,7 @@ class SecuritySession:
             )
             ck = b"\x03" + fields(encrypted, signed)
             await write_frame(self.writer, ck)
+            # 完整握手摘要参与双向 HMAC 确认，验证双方拿到同一份密钥材料。
             transcript = await self._hash(fields(ch, sh, ck))
             finish_key = bytes(material[40:72])
             sf = await read_frame(self.reader)
@@ -322,6 +343,7 @@ class SecuritySession:
             raise
 
     async def _accept(self) -> tuple[bytearray, bytes]:
+        """接收方：校验目标与信任 → 签名参数 → 验发起方签名并解密材料。"""
         ch = await read_frame(self.reader)
         if ch[:1] != b"\x01":
             raise ProtocolError("expected client hello")
@@ -334,6 +356,7 @@ class SecuritySession:
         trust = self.manager._trust(remote, outbound=False)
         self._peer = remote
         ns = await self.manager._crypto(lambda: self.manager.backend.random_bytes(32))
+        # 在本管理器内保留会话 ID；有限重试避免碰撞导致无界循环。
         for _ in range(8):
             sid = await self.manager._crypto(lambda: self.manager.backend.random_bytes(16))
             if sid not in self.manager._ids:
@@ -359,6 +382,7 @@ class SecuritySession:
         await self._verify(
             trust, fields(b"client-key", await self._hash(fields(ch, sh)), encrypted), signature
         )
+        # 先验发起方签名，再解密；网络消息不能替换本地配置中的可信公钥。
         material = bytearray(
             await self.manager._crypto(
                 lambda: self.manager.backend.decrypt_sm2(
@@ -385,6 +409,7 @@ class SecuritySession:
             raise
 
     def _direction(self, sending: bool) -> Direction:
+        # 方向以握手发起方为基准，而不是固定按 client/gateway/simulator 角色划分。
         return (
             Direction.INITIATOR_TO_ACCEPTOR
             if self.initiator == sending
@@ -392,12 +417,14 @@ class SecuritySession:
         )
 
     def _parameters(self, direction: Direction, sequence: int) -> tuple[bytes, bytes]:
+        """选择方向密钥，并以 4 字节方向前缀加 8 字节序号组成 GCM nonce。"""
         index = int(direction)
         return bytes(self._keys[index * 16 : index * 16 + 16]), bytes(
             self._keys[32 + index * 4 : 36 + index * 4]
         ) + struct.pack("!Q", sequence)
 
     def _record_policy(self, header: RecordHeader, plaintext: bytes) -> None:
+        # 控制记录使用零 UUID；业务记录按 UUID 跟踪在途请求和容量。
         kind, rid = header.record_type, header.request_id
         if kind in (RecordType.READY, RecordType.HEARTBEAT, RecordType.CLOSE, RecordType.CLOSE_ACK):
             if rid != ZERO_REQUEST or header.chunk_index != 0 or not header.end_of_message:
@@ -407,6 +434,7 @@ class SecuritySession:
         elif rid == ZERO_REQUEST:
             raise ProtocolError("missing business request identity")
         if kind is RecordType.REQUEST:
+            # DRAINING 允许已有请求的后续分片，但拒绝开始新的请求。
             if self.state is SessionState.DRAINING and rid not in self._inflight:
                 raise SessionExpiredError("session is draining")
             if rid not in self._inflight and len(self._inflight) >= self.manager.max_inflight:
@@ -421,6 +449,7 @@ class SecuritySession:
     async def _send(
         self, kind: RecordType, plaintext: bytes, rid: UUID, chunk: int, end: bool
     ) -> None:
+        """串行分配序号、认证头部并发送记录；失败由外层关闭会话。"""
         async with self._send_lock:
             self._check(ready=kind is RecordType.READY)
             if (
@@ -434,6 +463,7 @@ class SecuritySession:
             aad = encode_header(header, len(plaintext) + 16)
             self._record_policy(header, plaintext)
             key, nonce = self._parameters(header.direction, header.sequence)
+            # 在密码运算前消耗序号，失败时不回退，防止同密钥 nonce 被再次使用。
             self._send_sequence += 1
             encrypted = await self.manager._crypto(
                 lambda: self.manager.backend.seal_sm4_gcm(key, nonce, plaintext, aad)
@@ -453,6 +483,7 @@ class SecuritySession:
         chunk_index: int = 0,
         end_of_message: bool = True,
     ) -> None:
+        """发送业务或心跳记录；内部握手及关闭控制记录不能由业务层伪造。"""
         try:
             if record_type in (RecordType.READY, RecordType.CLOSE, RecordType.CLOSE_ACK):
                 raise ProtocolError("control record is reserved")
@@ -462,10 +493,12 @@ class SecuritySession:
             raise
 
     async def _receive(self) -> VerifiedRecord:
+        """严格校验会话、方向、序号及 GCM 标签，成功后才推进接收状态。"""
         self._check(ready=self._ready_pending)
         async with asyncio.timeout(self._remaining()):
             data = await read_frame(self.reader)
         header, aad, encrypted = decode_record(data)
+        # 必须是本会话下一条预期记录，拒绝跨会话替换、反射、重放和乱序。
         if (
             header.session_id != self.session_id
             or header.direction != self._direction(False)
@@ -482,6 +515,7 @@ class SecuritySession:
             lambda: self.manager.backend.open_sm4_gcm(key, nonce, encrypted, aad)
         )
         self._check(ready=self._ready_pending)
+        # 明文已通过 GCM 认证，才更新业务状态、序号与字节预算。
         self._record_policy(header, plaintext)
         self._receive_sequence += 1
         self._receive_bytes += len(plaintext)
@@ -489,6 +523,7 @@ class SecuritySession:
         return VerifiedRecord(header, plaintext)
 
     async def recv(self) -> VerifiedRecord:
+        """提供唯一接收入口；处理关闭控制记录，返回已认证的业务或心跳记录。"""
         self._check()
         if self._recv_lock.locked():
             raise ProtocolError("only one receiver is permitted")
@@ -518,6 +553,7 @@ class SecuritySession:
             raise
 
     async def close(self) -> None:
+        """在有限时间内尝试关闭确认，最终无论结果如何都回收会话。"""
         async with self._close_lock:
             if self.state is SessionState.CLOSED:
                 return
@@ -527,6 +563,7 @@ class SecuritySession:
                     self._close_sent = True
                     async with asyncio.timeout(min(self.manager.close_timeout, self._remaining())):
                         await self._send(RecordType.CLOSE, b"", ZERO_REQUEST, 0, True)
+                        # 已有 recv 正在读时，由它处理 ACK，close 不再争抢同一流。
                         if self._recv_lock.locked():
                             await self._ack.wait()
                         else:
@@ -549,6 +586,8 @@ class SecuritySession:
 
 
 class SecuritySessionManager:
+    """按本地信任配置管理会话准入、原生运算并发和所有子任务的生命周期。"""
+
     def __init__(
         self,
         backend: SecurityBackend,
@@ -589,6 +628,7 @@ class SecuritySessionManager:
         self._close_lock = asyncio.Lock()
 
     async def _crypto[T](self, operation: Callable[[], T]) -> T:
+        # 信号量限制原生运算并发；线程完成前不能释放它占用的工作名额。
         async with self._workers:
             if self._crypto_stopped:
                 raise ProtocolError("manager crypto stopped")
@@ -601,6 +641,7 @@ class SecuritySessionManager:
                 self._native_tasks.discard(task)
 
     def _trust(self, peer: PeerIdentity, *, outbound: bool) -> TrustRecord:
+        # 信任有效期使用墙上时钟；角色只允许 client→gateway→simulator 两段链路。
         entry = self.trust.get(peer.peer_id)
         now = self.wall_clock()
         pair = (self.local.peer.role, peer.role) if outbound else (peer.role, self.local.peer.role)
@@ -622,6 +663,7 @@ class SecuritySessionManager:
         self._ids.add(sid)
 
     def _admit(self) -> None:
+        # 未完成握手也占用总容量，避免大量半开连接绕过活动会话上限。
         if self._closed:
             raise ProtocolError("manager closed")
         active = sum(
@@ -633,6 +675,7 @@ class SecuritySessionManager:
         self._pending += 1
 
     async def open(self, peer: PeerIdentity) -> SecuritySession:
+        """连接本地信任表中的固定地址，返回已完成认证的出站会话。"""
         self._admit()
         return await self._finish_handshake(asyncio.create_task(self._open(peer)))
 
@@ -641,6 +684,7 @@ class SecuritySessionManager:
         task: asyncio.Task["SecuritySession"],
         writer: asyncio.StreamWriter | None = None,
     ) -> SecuritySession:
+        # 完成回调统一归还握手名额，覆盖成功、异常和取消三种退出路径。
         self._handshakes.add(task)
 
         def finished(completed: asyncio.Task[SecuritySession]) -> None:
@@ -687,6 +731,7 @@ class SecuritySessionManager:
     async def accept(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> SecuritySession:
+        """接收已有 TCP 连接；认证与准入失败时负责关闭该连接。"""
         try:
             self._admit()
         except BaseException:
@@ -717,6 +762,7 @@ class SecuritySessionManager:
             raise
 
     async def rotate(self, session: SecureSession) -> SecuritySession:
+        """重新握手得到独立新会话，旧会话进入 DRAINING 供已有请求收尾。"""
         if (
             not isinstance(session, SecuritySession)
             or session not in self._sessions
@@ -730,6 +776,7 @@ class SecuritySessionManager:
         return fresh
 
     async def close(self) -> None:
+        """停止准入，收回握手和会话，最后等所有原生线程任务结束。"""
         async with self._close_lock:
             self._closed = True
             handshakes = tuple(
@@ -748,5 +795,6 @@ class SecuritySessionManager:
             finally:
                 for session in tuple(self._sessions):
                     session._abort()
+                # 关闭确认仍需要密码运算，因此在会话清理完成后才停止接收原生工作。
                 self._crypto_stopped = True
                 await _await_completion(asyncio.gather(*self._native_tasks, return_exceptions=True))
