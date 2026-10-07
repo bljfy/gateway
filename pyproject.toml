@@ -8,6 +8,9 @@ dependencies = [
     "gmssl-python==2.2.2",
 ]
 
+[project.scripts]
+guomi-gateway = "gateway.cli:main"
+
 [build-system]
 requires = ["uv_build==0.8.22"]
 build-backend = "uv_build"

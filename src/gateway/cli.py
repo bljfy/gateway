@@ -11,8 +11,18 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from gateway.contracts import GatewayError, InferenceRequest, PeerRole
-from gateway.runtime import load_runtime, prepare_demo, request_from_file, run_client, run_server
+from gateway.runtime import (
+    Runtime,
+    load_runtime,
+    prepare_demo,
+    request_from_file,
+    run_client,
+    run_server,
+)
 from gateway.simulator import InferenceSimulator
+
+DEMO_DIRECTORY = Path(".tools/demo")
+NATIVE_MANIFEST = Path(".tools/gmssl/manifest.json")
 
 
 def _positive_int(value: str) -> int:
@@ -75,25 +85,93 @@ def build_parser() -> argparse.ArgumentParser:
     simulate.set_defaults(func=_simulate)
 
     demo = subparsers.add_parser("init-demo", help="create fresh local demo identities and configs")
-    demo.add_argument("--directory", required=True, type=Path)
-    demo.add_argument("--manifest", required=True, type=Path)
+    demo.add_argument("--directory", default=DEMO_DIRECTORY, type=Path)
+    demo.add_argument("--manifest", default=NATIVE_MANIFEST, type=Path)
     demo.add_argument("--gateway-port", type=_positive_int, default=18443)
     demo.add_argument("--simulator-port", type=_positive_int, default=19443)
     demo.add_argument("--metrics-port", type=_positive_int, default=19100)
     demo.set_defaults(func=_init_demo)
     for command in ("gateway", "simulator"):
         server = subparsers.add_parser(command, help=f"run the secure {command} listener")
-        server.add_argument("--config", required=True, type=Path)
+        server.add_argument("--config", default=DEMO_DIRECTORY / f"{command}.json", type=Path)
         server.add_argument("--stop-file", type=Path)
         server.set_defaults(func=_server)
     client = subparsers.add_parser("client", help="send an inference request through the gateway")
-    client.add_argument("--config", required=True, type=Path)
-    client.add_argument("--prompt-file", required=True, type=Path)
-    client.add_argument("--model", default="mock-model")
-    client.add_argument("--max-output-tokens", type=_positive_int, default=512)
-    client.add_argument("--stream", action="store_true")
+    client.add_argument("--config", default=DEMO_DIRECTORY / "client.json", type=Path)
+    _request_options(client, required=True)
     client.set_defaults(func=_client)
+    quick = subparsers.add_parser("demo", help="initialize, run a secure request and stop services")
+    quick.add_argument("--directory", default=DEMO_DIRECTORY, type=Path)
+    quick.add_argument("--manifest", default=NATIVE_MANIFEST, type=Path)
+    quick.add_argument("--gateway-port", type=_positive_int, default=18443)
+    quick.add_argument("--simulator-port", type=_positive_int, default=19443)
+    quick.add_argument("--metrics-port", type=_positive_int, default=19100)
+    _request_options(quick, required=False)
+    quick.set_defaults(func=_demo)
     return parser
+
+
+def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None:
+    prompt = parser.add_mutually_exclusive_group(required=required)
+    prompt.add_argument("--prompt", help="prompt text")
+    prompt.add_argument("--prompt-file", type=Path, help="UTF-8 prompt file")
+    parser.add_argument("--model", default="mock-model")
+    parser.add_argument("--max-output-tokens", type=_positive_int, default=512)
+    parser.add_argument("--stream", action="store_true")
+
+
+def _request(args: argparse.Namespace) -> InferenceRequest:
+    if args.prompt_file is not None:
+        return request_from_file(args.prompt_file, args.model, args.max_output_tokens)
+    return InferenceRequest(
+        uuid4(),
+        args.model,
+        args.prompt if args.prompt is not None else "你好",
+        max_output_tokens=args.max_output_tokens,
+    )
+
+
+def _demo(args: argparse.Namespace) -> int:
+    request = _request(args)
+    if not args.directory.exists():
+        prepare_demo(
+            args.directory,
+            args.manifest,
+            gateway_port=args.gateway_port,
+            simulator_port=args.simulator_port,
+            metrics_port=args.metrics_port,
+        )
+
+    async def run() -> None:
+        runtimes: list[Runtime] = []
+        tasks: list[asyncio.Task[None]] = []
+        try:
+            for role in (PeerRole.SIMULATOR, PeerRole.GATEWAY, PeerRole.CLIENT):
+                runtimes.append(load_runtime(args.directory / f"{role.value}.json", role))
+            for runtime in runtimes[:2]:
+                ready = asyncio.Event()
+                server = asyncio.create_task(run_server(runtime, ready=ready.set))
+                tasks.append(server)
+                waiter = asyncio.create_task(ready.wait())
+                try:
+                    async with asyncio.timeout(10):
+                        await asyncio.wait((server, waiter), return_when=asyncio.FIRST_COMPLETED)
+                    if server.done():
+                        server.result()
+                        raise GatewayError("demo service stopped before readiness")
+                finally:
+                    waiter.cancel()
+                    await asyncio.gather(waiter, return_exceptions=True)
+            await run_client(runtimes[2], request, stream=args.stream, write=sys.stdout.write)
+        finally:
+            for task in reversed(tasks):
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for runtime in reversed(runtimes):
+                await runtime.manager.close()
+
+    asyncio.run(run())
+    return 0
 
 
 def _init_demo(args: argparse.Namespace) -> int:
@@ -136,7 +214,7 @@ def _server(args: argparse.Namespace) -> int:
 
 def _client(args: argparse.Namespace) -> int:
     runtime = load_runtime(args.config, PeerRole.CLIENT)
-    request = request_from_file(args.prompt_file, args.model, args.max_output_tokens)
+    request = _request(args)
     asyncio.run(run_client(runtime, request, stream=args.stream, write=sys.stdout.write))
     return 0
 

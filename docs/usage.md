@@ -4,14 +4,26 @@
 
 ## 环境
 
-按 [开发指南](developer_guide.md) 准备环境后，本地命令通过 `.tools/uv/uv.exe run --locked` 或同版本的 `uv` 执行。
+按 [开发指南](developer_guide.md) 准备环境后，从仓库根目录运行。Windows 入口为 `.\.venv\Scripts\guomi-gateway.exe`，Linux 入口为 `.venv/bin/guomi-gateway`。也可以用 `uv run --locked guomi-gateway`；项目自带 uv 位于 Windows 的 `.tools/uv/uv.exe` 或 Linux 的 `.tools/uv/uv`。已有环境执行一次 `uv sync --locked` 以安装新入口。`python -m gateway.cli` 仍可使用。Linux 启动前按 [原生环境](protocol.md#原生环境) 设置 `LD_LIBRARY_PATH`。
+
+## 一条命令演示
+
+```powershell
+.\.venv\Scripts\guomi-gateway.exe demo
+.\.venv\Scripts\guomi-gateway.exe demo --prompt "你好" --stream
+.\.venv\Scripts\guomi-gateway.exe demo --prompt-file prompt.txt --model mock-model
+```
+
+`demo` 首次在 `.tools/demo` 创建身份和配置，读取 `.tools/gmssl/manifest.json`。在同一进程中启动模拟器和网关，等待就绪，再通过两段真实国密 TCP 会话发送请求。省略提示词默认发送“你好”。请求结束、启动失败或 Ctrl+C 时关闭服务和会话并排空审计；审计保留在 `.tools/demo/audit.jsonl`，提示词不写入配置目录。
+
+再次运行复用已有身份和配置。已有目录不完整或配置无效时返回失败，不覆盖文件。`--directory` 和 `--manifest` 可指定目录和原生清单；`--gateway-port`、`--simulator-port`、`--metrics-port` 仅在新建目录时生效。修改已有端口需停止服务后编辑可信配置，或用新目录初始化。不要与使用同一端口的独立服务同时运行。
 
 ## 三程序演示
 
 从仓库根目录执行，初始化目录必须尚不存在：
 
 ```powershell
-.\.tools\uv\uv.exe run --locked python -m gateway.cli init-demo --directory .tools/demo --manifest .tools/gmssl/manifest.json
+.\.venv\Scripts\guomi-gateway.exe init-demo
 ```
 
 默认客户端目标为 `127.0.0.1:18443`，模拟服务为 `127.0.0.1:19443`，指标为 `127.0.0.1:19100`。端口冲突时在初始化命令提供 `--gateway-port`、`--simulator-port`、`--metrics-port`，三者必须不同。初始化生成独立 SM2 签名与加密身份、加密 DER 私钥、口令文件、角色 JSON 和共享 TOML；目录权限限制为当前用户，文件留在忽略目录。JSON 与 TOML 字段见 [配置说明](configuration.md)。
@@ -19,41 +31,43 @@
 分别在两个终端启动，等待各自输出 `ready`：
 
 ```powershell
-.\.tools\uv\uv.exe run --locked python -m gateway.cli simulator --config .tools/demo/simulator.json --stop-file .tools/demo/simulator.stop
+.\.venv\Scripts\guomi-gateway.exe simulator
 ```
 
 ```powershell
-.\.tools\uv\uv.exe run --locked python -m gateway.cli gateway --config .tools/demo/gateway.json --stop-file .tools/demo/gateway.stop
+.\.venv\Scripts\guomi-gateway.exe gateway
 ```
 
-第三个终端准备 UTF-8 提示词并请求：
+第三个终端发送请求：
 
 ```powershell
-[System.IO.File]::WriteAllText((Join-Path $PWD '.tools/demo/prompt.txt'), '你好', [System.Text.UTF8Encoding]::new($false))
-.\.tools\uv\uv.exe run --locked python -m gateway.cli client --config .tools/demo/client.json --prompt-file .tools/demo/prompt.txt --model mock-model
-.\.tools\uv\uv.exe run --locked python -m gateway.cli client --config .tools/demo/client.json --prompt-file .tools/demo/prompt.txt --model mock-model --stream
+.\.venv\Scripts\guomi-gateway.exe client --prompt "你好"
+.\.venv\Scripts\guomi-gateway.exe client --prompt "你好" --stream
+.\.venv\Scripts\guomi-gateway.exe client --prompt-file prompt.txt
 Invoke-WebRequest http://127.0.0.1:19100/metrics
 ```
 
 客户端输出业务响应；网关审计输出到 `.tools/demo/audit.jsonl`。配置、认证或业务失败返回非零退出码和固定错误，不输出密钥或异常全文。模拟器的 `max_output_tokens` 按 Python 字符数截断确定性输出，不代表真实模型 token 计数。
 
-停机使用 Ctrl+C，或创建启动时指定的停止文件：
+各角色默认读取 `.tools/demo/<角色>.json`，可通过 `--config` 指定其他配置。客户端必须提供 `--prompt` 或 UTF-8 `--prompt-file`，两者互斥。命令行提示词会出现在终端历史与进程参数中，需要避免此类记录时使用文件。
+
+停机使用 Ctrl+C。需要停止文件时，启动服务加 `--stop-file .tools/demo/gateway.stop` 或 `--stop-file .tools/demo/simulator.stop`，再创建对应文件：
 
 ```powershell
 New-Item -ItemType File .tools/demo/gateway.stop
 New-Item -ItemType File .tools/demo/simulator.stop
 ```
 
-服务排空审计并清理任务、会话及监听端口。重新启动前删除对应停止文件；密钥恢复与版本回滚见 [部署说明](deployment.md)。Linux 使用 `.tools/uv/uv` 和相同 Python 子命令，并在启动前按 [原生环境](protocol.md#原生环境) 设置 `LD_LIBRARY_PATH`。
+服务排空审计并清理任务、会话及监听端口。重新启动前删除对应停止文件；密钥恢复与版本回滚见 [部署说明](deployment.md)。Linux 使用 `.venv/bin/guomi-gateway` 和相同子命令。
 
 ## 确定性模拟器（命令行）
 
 `cli.py` 提供 `simulate` 子命令，直接运行确定性模拟推理，不涉及网络与会话：
 
 ```powershell
-.\.tools\uv\uv.exe run --locked python -m gateway.cli simulate --prompt "你好" --model "mock-model"
-.\.tools\uv\uv.exe run --locked python -m gateway.cli simulate --prompt "你好" --context "片段A" --context "片段B"
-.\.tools\uv\uv.exe run --locked python -m gateway.cli simulate --prompt "你好" --stream
+.\.venv\Scripts\guomi-gateway.exe simulate --prompt "你好" --model "mock-model"
+.\.venv\Scripts\guomi-gateway.exe simulate --prompt "你好" --context "片段A" --context "片段B"
+.\.venv\Scripts\guomi-gateway.exe simulate --prompt "你好" --stream
 ```
 
 `--context` 可重复提供多个检索片段；`--max-output-tokens` 控制输出预算；`--stream` 按分片输出。`--request-id` 不传时自动生成 UUID。

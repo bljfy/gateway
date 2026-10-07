@@ -52,6 +52,8 @@ max_plaintext_bytes_per_direction = 1073741824
 
 `init-demo` 生成 `client.json`、`gateway.json`、`simulator.json`。每个 JSON 最多 64 KiB，拒绝未知字段、错误角色、重复信任身份和非法类型。路径相对 JSON 所在目录解析，也接受受运维控制的绝对路径。实际生成文件是可直接运行的配置示例。
 
+`init-demo` 默认目录为 `.tools/demo`，原生清单为 `.tools/gmssl/manifest.json`。`demo` 在目录不存在时调用同一初始化流程，存在时校验并复用配置；不会覆盖身份。独立角色命令默认读取 `.tools/demo/<角色>.json`，可用 `--config` 覆盖。所有默认路径相对命令执行目录；示例从仓库根目录运行。
+
 | 字段 | 内容 |
 | --- | --- |
 | `peer_id`、`role` | 本地身份和 `client` / `gateway` / `simulator` 角色，密钥版本固定为 1 |
