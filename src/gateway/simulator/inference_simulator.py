@@ -1,7 +1,7 @@
-"""Deterministic mock inference and the simulator's inbound session loop.
+"""Mock inference with response metadata and the simulator's inbound session loop.
 
-The simulator runs the same computation for the same request so tests and
-benchmarks are reproducible. It performs no cryptography; callers must only pass
+The business body is deterministic; response metadata records generation time
+and the request UUID. It performs no cryptography; callers must only pass
 authenticated plaintext, and the inbound loop replies through an authenticated
 session.
 """
@@ -9,7 +9,9 @@ session.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 
 from gateway.codec import decode_request, encode_response
 from gateway.config import Limits
@@ -30,7 +32,7 @@ STREAM_CHUNK_CHARS = 256
 
 
 class InferenceSimulator:
-    """Implements the deterministic inference business interface."""
+    """Implements mock inference with a timestamp and request identity."""
 
     def __init__(
         self, *, stream_chunk_chars: int = STREAM_CHUNK_CHARS, limits: Limits | None = None
@@ -43,7 +45,7 @@ class InferenceSimulator:
         self._limits = limits if limits is not None else Limits()
 
     async def complete(self, request: InferenceRequest) -> InferenceResponse:
-        """Return a deterministic response for the request."""
+        """Return metadata followed by the deterministic business body."""
         return InferenceResponse(request_id=request.request_id, output=self._output(request))
 
     def stream(self, request: InferenceRequest) -> AsyncIterator[InferenceChunk]:
@@ -166,4 +168,11 @@ class InferenceSimulator:
         body = f"[mock:{request.model}] {request.prompt}"
         if context:
             body = f"{body} (context: {context})"
-        return body[: request.max_output_tokens]
+        metadata = json.dumps(
+            {
+                "timestamp": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                "request_id": str(request.request_id),
+            },
+            separators=(",", ":"),
+        )
+        return metadata + "\n" + body[: request.max_output_tokens]

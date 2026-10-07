@@ -3,6 +3,7 @@
 import asyncio
 import getpass
 import json
+import logging
 import os
 import subprocess
 from collections.abc import Callable
@@ -20,6 +21,8 @@ from gateway.metrics import Metrics, start_metrics_server
 from gateway.server import GatewayServer
 from gateway.session import LocalIdentity, SecuritySessionManager, TrustRecord
 from gateway.simulator import InferenceSimulator
+
+LOGGER = logging.getLogger(__name__)
 
 
 def read_bounded(path: Path, limit: int) -> bytes:
@@ -274,6 +277,7 @@ async def run_server(
     runtime: Runtime, *, stop: asyncio.Event | None = None, ready: Callable[[], None] | None = None
 ) -> None:
     manager = runtime.manager
+    role = manager.local.peer.role.value
     handlers: set[asyncio.Task[None]] = set()
     metrics_server: asyncio.Server | None = None
     listener: asyncio.Server | None = None
@@ -326,10 +330,15 @@ async def run_server(
                 port=runtime.gateway.metrics_port,
             )
         listener = await asyncio.start_server(handle, *runtime.listen)
+        LOGGER.info("server_started role=%s host=%s port=%d", role, *runtime.listen)
         if ready:
             ready()
         await (stop.wait() if stop is not None else listener.serve_forever())
+    except Exception:
+        LOGGER.error("server_failed role=%s", role)
+        raise
     finally:
+        LOGGER.info("server_stopping role=%s", role)
         if listener:
             listener.close()
         if metrics_server:
@@ -349,6 +358,7 @@ async def run_server(
             await listener.wait_closed()
         if metrics_server:
             await metrics_server.wait_closed()
+        LOGGER.info("server_stopped role=%s", role)
 
 
 async def run_client(
@@ -358,8 +368,10 @@ async def run_client(
     try:
         if runtime.target is None:
             raise GatewayError("client target missing")
+        LOGGER.info("client_connecting request_id=%s stream=%s", request.request_id, stream)
         async with asyncio.timeout(runtime.gateway.limits.request_timeout_seconds):
             session = await runtime.manager.open(runtime.target)
+            LOGGER.info("client_authenticated request_id=%s", request.request_id)
             client = InferenceClient(session, runtime.gateway.limits)
             if stream:
                 async for chunk in client.stream(request):
@@ -367,6 +379,10 @@ async def run_client(
                 write("\n")
             else:
                 write((await client.complete(request)).output + "\n")
+            LOGGER.info("client_completed request_id=%s", request.request_id)
+    except Exception:
+        LOGGER.error("client_failed request_id=%s", request.request_id)
+        raise
     finally:
         if session:
             await session.close()

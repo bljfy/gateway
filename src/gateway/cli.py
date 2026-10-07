@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -63,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="guomi-gateway",
         description="Application workstream CLI for the national-crypto inference gateway.",
     )
+    parser.add_argument("--quiet", action="store_true", help="hide console progress logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     simulate = subparsers.add_parser("simulate", help="run the deterministic mock inference")
@@ -118,13 +121,20 @@ def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None
     parser.add_argument("--model", default="mock-model")
     parser.add_argument("--max-output-tokens", type=_positive_int, default=512)
     parser.add_argument("--stream", action="store_true")
+    parser.add_argument("--request-id", type=UUID, help="request UUID; generated when absent")
 
 
 def _request(args: argparse.Namespace) -> InferenceRequest:
     if args.prompt_file is not None:
-        return request_from_file(args.prompt_file, args.model, args.max_output_tokens)
+        request = request_from_file(args.prompt_file, args.model, args.max_output_tokens)
+        return InferenceRequest(
+            args.request_id or request.request_id,
+            request.model,
+            request.prompt,
+            max_output_tokens=request.max_output_tokens,
+        )
     return InferenceRequest(
-        uuid4(),
+        args.request_id or uuid4(),
         args.model,
         args.prompt if args.prompt is not None else "你好",
         max_output_tokens=args.max_output_tokens,
@@ -222,6 +232,17 @@ def _client(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     func: Callable[[argparse.Namespace], int] = args.func
+    logger = logging.getLogger("gateway")
+    previous_level = logger.level
+    handler = logging.StreamHandler(sys.stderr)
+    formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ"
+    )
+    formatter.converter = time.gmtime
+    handler.setFormatter(formatter)
+    handler.setLevel(logging.ERROR if args.quiet else logging.INFO)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
     try:
         return func(args)
     except KeyboardInterrupt:
@@ -229,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
     except (GatewayError, ValueError, OSError, TimeoutError, subprocess.CalledProcessError):
         print("command failed", file=sys.stderr)
         return 1
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        handler.close()
 
 
 if __name__ == "__main__":

@@ -1,23 +1,26 @@
-"""CLI entry: deterministic simulator subcommand behaviour."""
+"""CLI entry: simulator metadata, prompt sources and command defaults."""
+
+from uuid import uuid4
 
 import pytest
 
 from gateway.cli import build_parser, main
+from test.fixtures.simulator_output import response_body
 
 
 def test_simulate_prints_deterministic_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["simulate", "--prompt", "hello", "--model", "m"]) == 0
-    assert capsys.readouterr().out == "[mock:m] hello\n"
+    assert response_body(capsys.readouterr().out) == "[mock:m] hello\n"
 
 
 def test_simulate_stream_reassembles_output(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["simulate", "--prompt", "hello", "--stream"]) == 0
-    assert capsys.readouterr().out == "[mock:mock-model] hello\n"
+    assert response_body(capsys.readouterr().out) == "[mock:mock-model] hello\n"
 
 
 def test_simulate_includes_context_items(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["simulate", "--prompt", "hi", "--context", "a", "--context", "b"]) == 0
-    assert capsys.readouterr().out == "[mock:mock-model] hi (context: a | b)\n"
+    assert response_body(capsys.readouterr().out) == "[mock:mock-model] hi (context: a | b)\n"
 
 
 def test_simulate_requires_prompt() -> None:
@@ -51,3 +54,9 @@ def test_init_demo_defaults() -> None:
     args = build_parser().parse_args(["init-demo"])
     assert args.directory.as_posix() == ".tools/demo"
     assert args.manifest.as_posix() == ".tools/gmssl/manifest.json"
+
+
+def test_simulate_uses_explicit_request_uuid(capsys: pytest.CaptureFixture[str]) -> None:
+    request_id = uuid4()
+    assert main(["simulate", "--prompt", "hello", "--request-id", str(request_id)]) == 0
+    assert response_body(capsys.readouterr().out, request_id) == "[mock:mock-model] hello\n"

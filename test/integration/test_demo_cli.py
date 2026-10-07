@@ -6,17 +6,20 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
 from gateway.cli import main
 from gateway.crypto import GmSSLBackend
+from test.fixtures.simulator_output import response_body
 from test.integration.test_topology import ports
 
 
 @pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("quiet", [False, True])
 def test_demo_reuses_identities_and_releases_ports(
-    tmp_path: Path, backend: GmSSLBackend, blocked: bool
+    tmp_path: Path, backend: GmSSLBackend, blocked: bool, quiet: bool
 ) -> None:
     manifest = tmp_path / "native.json"
     manifest.write_text(
@@ -42,6 +45,8 @@ def test_demo_reuses_identities_and_releases_ports(
         str(mp),
     ]
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+    if quiet:
+        command.insert(3, "--quiet")
 
     def run(arguments: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -60,16 +65,36 @@ def test_demo_reuses_identities_and_releases_ports(
             listener.listen()
             failure = run(["--prompt", "synthetic-demo-marker"])
         assert failure.returncode == 1
-        assert failure.stdout == "" and failure.stderr == "command failed\n"
-    success = run(["--prompt", "synthetic-demo-marker", "--model", "m"])
-    assert success.returncode == 0 and success.stderr == ""
-    assert success.stdout == "[mock:m] synthetic-demo-marker\n"
+        assert failure.stdout == "" and failure.stderr.endswith("command failed\n")
+        assert "server_failed role=gateway" in failure.stderr
+        assert "synthetic-demo-marker" not in failure.stderr
+    request_id = uuid4()
+    success = run(
+        ["--prompt", "synthetic-demo-marker", "--model", "m", "--request-id", str(request_id)]
+    )
+    assert success.returncode == 0
+    assert response_body(success.stdout, request_id) == "[mock:m] synthetic-demo-marker\n"
+    for stage in (
+        "server_started",
+        "client_authenticated",
+        "upstream_authenticated",
+        "request_forwarded",
+        "response_started",
+        "request_finished result=ok",
+        "server_stopped",
+    ):
+        if quiet:
+            assert success.stderr == ""
+        else:
+            assert stage in success.stderr
+    assert "synthetic-demo-marker" not in success.stderr
     keys = {path.name: path.read_bytes() for path in directory.glob("*.der")}
     prompt = tmp_path / "prompt.txt"
     prompt.write_text("synthetic-demo-marker-file", encoding="utf-8")
     streamed = run(["--prompt-file", str(prompt), "--stream"])
-    assert streamed.returncode == 0 and streamed.stderr == ""
-    assert streamed.stdout == "[mock:mock-model] synthetic-demo-marker-file\n"
+    assert streamed.returncode == 0
+    assert response_body(streamed.stdout) == "[mock:mock-model] synthetic-demo-marker-file\n"
+    assert "synthetic-demo-marker" not in streamed.stderr
     assert keys == {path.name: path.read_bytes() for path in directory.glob("*.der")}
     audit = (directory / "audit.jsonl").read_text(encoding="utf-8")
     assert "synthetic-demo-marker" not in audit

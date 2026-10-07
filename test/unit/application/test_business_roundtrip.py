@@ -20,6 +20,7 @@ from gateway.contracts import (
 )
 from gateway.simulator import InferenceSimulator
 from test.fixtures.in_memory import InMemorySession, connect_pair
+from test.fixtures.simulator_output import response_body
 
 CLIENT_PEER = PeerIdentity("client", PeerRole.CLIENT)
 SIMULATOR_PEER = PeerIdentity("simulator", PeerRole.SIMULATOR)
@@ -41,7 +42,7 @@ async def test_complete_roundtrip_through_sessions() -> None:
     response = await InferenceClient(client_session).complete(request)
 
     assert response.request_id == request.request_id
-    assert response.output == "[mock:mock-model] hello"
+    assert response_body(response.output, request.request_id) == "[mock:mock-model] hello"
     await _finish(client_session, serve_task)
 
 
@@ -56,7 +57,7 @@ async def test_large_request_roundtrip_through_sessions() -> None:
     response = await InferenceClient(client_session).complete(request)
 
     assert response.request_id == request.request_id
-    assert response.output.startswith("[mock:mock-model] ")
+    assert response_body(response.output, request.request_id).startswith("[mock:mock-model] ")
     await _finish(client_session, serve_task)
 
 
@@ -72,7 +73,9 @@ async def test_stream_roundtrip_through_sessions() -> None:
 
     assert chunks[-1].is_final is True
     assert all(chunk.request_id == request.request_id for chunk in chunks)
-    assert "".join(chunk.output for chunk in chunks).startswith("[mock:mock-model] ")
+    assert response_body("".join(chunk.output for chunk in chunks), request.request_id).startswith(
+        "[mock:mock-model] "
+    )
     await _finish(client_session, serve_task)
 
 

@@ -47,7 +47,7 @@
 Invoke-WebRequest http://127.0.0.1:19100/metrics
 ```
 
-客户端输出业务响应；网关审计输出到 `.tools/demo/audit.jsonl`。配置、认证或业务失败返回非零退出码和固定错误，不输出密钥或异常全文。模拟器的 `max_output_tokens` 按 Python 字符数截断确定性输出，不代表真实模型 token 计数。
+客户端输出带标识的业务响应；网关审计输出到 `.tools/demo/audit.jsonl`，终端同时显示运行过程。配置、认证或业务失败返回非零退出码和固定错误。模拟器的 `max_output_tokens` 按 Python 字符数截断业务正文，不代表真实模型 token 计数；时间戳与 UUID 信息不占正文预算，但计入整个响应的字节限额。
 
 各角色默认读取 `.tools/demo/<角色>.json`，可通过 `--config` 指定其他配置。客户端必须提供 `--prompt` 或 UTF-8 `--prompt-file`，两者互斥。命令行提示词会出现在终端历史与进程参数中，需要避免此类记录时使用文件。
 
@@ -60,9 +60,53 @@ New-Item -ItemType File .tools/demo/simulator.stop
 
 服务排空审计并清理任务、会话及监听端口。重新启动前删除对应停止文件；密钥恢复与版本回滚见 [部署说明](deployment.md)。Linux 使用 `.venv/bin/guomi-gateway` 和相同子命令。
 
-## 确定性模拟器（命令行）
+## 响应标识与运行日志
 
-`cli.py` 提供 `simulate` 子命令，直接运行确定性模拟推理，不涉及网络与会话：
+`simulate`、安全服务 `simulator` 及 `demo` 返回的输出都在原业务正文前增加一行 JSON：
+
+```text
+{"timestamp":"2026-10-07T08:00:00.123+00:00","request_id":"d0c082b3-a280-4ac2-8c53-0ee5c30b2dd9"}
+[mock:mock-model] 你好
+```
+
+`timestamp` 为生成响应时的 UTC 时间，精确到毫秒；`request_id` 与客户端请求 UUID 一致。每次请求默认生成 UUID，`client`、`demo` 和 `simulate` 均可用 `--request-id <UUID>` 指定。流式输出只生成一次标识信息，随后按分片发送标识和正文；单个分片不保证包含完整 JSON 行。业务正文保持确定性，整个响应会随时间变化。
+
+CLI 的过程日志写入 stderr，响应写入 stdout。网关显示 `server_started`、`client_authenticated`、`request_started`、`upstream_authenticated`、`request_forwarded`、`response_started`、`request_finished`、`server_stopped` 等阶段，附带 UTC 时间、审计 UUID、字节数及结束耗时。网关的 `audit_id` 为独立生成的审计标识，客户端日志与响应中的 `request_id` 为业务请求标识。日志只输出固定阶段和允许的元数据，不输出提示词、响应正文、私钥或异常全文。
+
+只查看响应时，把全局参数 `--quiet` 放在子命令前：
+
+```powershell
+.\.venv\Scripts\guomi-gateway.exe --quiet demo --prompt "你好"
+```
+
+`--quiet` 隐藏 INFO 过程日志，审计文件继续写入，失败仍返回非零退出码。Python 编程接口使用标准 logging，由调用方配置日志级别与处理器。
+
+## 16 KiB 手动测试
+
+从仓库根目录生成 16384 字节的 ASCII 提示词，并发送一次请求：
+
+```powershell
+$prompt = 'x' * 16384
+$path = Join-Path $PWD '.tools/prompt-16kb.txt'
+[System.IO.File]::WriteAllText($path, $prompt, [System.Text.UTF8Encoding]::new($false))
+(Get-Item $path).Length
+$requestId = [guid]::NewGuid().ToString()
+$result = & .\.venv\Scripts\guomi-gateway.exe demo --prompt-file $path --model m --max-output-tokens 20000 --request-id $requestId
+$code = $LASTEXITCODE
+$text = $result -join "`n"
+$parts = $text -split "`n", 2
+$metadata = $parts[0] | ConvertFrom-Json
+"退出码：$code"
+"UUID 一致：$($metadata.request_id -eq $requestId)"
+"响应正文完整：$($parts[1] -ceq ('[mock:m] ' + $prompt))"
+$metadata.timestamp
+```
+
+预期文件大小 `16384`，退出码 `0`，两项比较均为 `True`。加 `--stream` 可执行同样的流式验证。分开启动服务时将 `demo` 改为 `client`，网关日志显示在网关终端。16 KiB 指提示词正文；响应额外包含元数据和模拟模型前缀，线上报文还包含编码与认证开销。
+
+## 模拟器（命令行）
+
+`cli.py` 提供 `simulate` 子命令，直接生成带标识的模拟响应，不涉及网络与会话：
 
 ```powershell
 .\.venv\Scripts\guomi-gateway.exe simulate --prompt "你好" --model "mock-model"
@@ -83,7 +127,7 @@ from gateway.client import InferenceClient
 from gateway.contracts import InferenceRequest
 from gateway.simulator import InferenceSimulator
 
-# 模拟服务端：确定性、无副作用，可独立运行
+# 模拟服务端：业务正文确定性，响应携带生成时间与请求 UUID
 simulator = InferenceSimulator()
 response = await simulator.complete(InferenceRequest(uuid4(), "mock-model", "你好"))
 chunks = [chunk async for chunk in simulator.stream(InferenceRequest(uuid4(), "mock-model", "你好"))]

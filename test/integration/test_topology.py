@@ -26,6 +26,7 @@ from gateway.crypto import GmSSLBackend
 from gateway.runtime import Runtime, load_runtime, prepare_demo, run_server
 from gateway.session import SecuritySession
 from gateway.simulator import InferenceSimulator
+from test.fixtures.simulator_output import response_body
 
 
 def ports() -> tuple[int, int, int]:
@@ -134,9 +135,13 @@ async def test_real_roundtrip_and_privacy(
     if stream:
         chunks = [chunk async for chunk in client.stream(request)]
         assert chunks[-1].is_final and sum(item.is_final for item in chunks) == 1
-        assert "".join(item.output for item in chunks) == expected
+        assert response_body("".join(item.output for item in chunks), request.request_id) == (
+            response_body(expected, request.request_id)
+        )
     else:
-        assert (await client.complete(request)).output == expected
+        assert response_body((await client.complete(request)).output, request.request_id) == (
+            response_body(expected, request.request_id)
+        )
     assert topology.key_fingerprints[0][0] != session.session_id
     assert topology.key_fingerprints[0][1] != hashlib.sha256(session._keys).hexdigest()
     assert all(marker.encode() not in packet for packet in packets)
@@ -324,7 +329,11 @@ async def test_configured_small_records_preserve_unicode(topology: Topology, str
     request = InferenceRequest(uuid4(), "m", "中文🙂" * 20, max_output_tokens=200)
     expected = (await InferenceSimulator().complete(request)).output
     if stream:
-        assert "".join([chunk.output async for chunk in client.stream(request)]) == expected
+        assert response_body(
+            "".join([chunk.output async for chunk in client.stream(request)]), request.request_id
+        ) == response_body(expected, request.request_id)
     else:
-        assert (await client.complete(request)).output == expected
+        assert response_body((await client.complete(request)).output, request.request_id) == (
+            response_body(expected, request.request_id)
+        )
     await session.close()

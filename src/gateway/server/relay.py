@@ -1,6 +1,7 @@
 """Bounded ordinary request relay; business payload encoding belongs to C."""
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from time import monotonic
 from uuid import UUID, uuid4
@@ -22,6 +23,8 @@ from gateway.contracts import (
     VerifiedRecord,
 )
 from gateway.metrics import Metrics
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -68,9 +71,19 @@ class GatewayServer:
         except Exception:
             accepted = False
         if not accepted:
+            LOGGER.error("audit_rejected")
             self.metrics.increment("audit_failure")
             if terminal:
                 self._audit_failed = True
+        else:
+            LOGGER.info(
+                "%s result=%s audit_id=%s duration_ms=%.3f bytes=%d",
+                event.event_code,
+                event.result,
+                event.request_id,
+                event.duration_ms,
+                event.byte_count,
+            )
         return accepted
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -81,6 +94,7 @@ class GatewayServer:
             or self._pending >= self.config.limits.max_pending
             or self._active + self._pending >= self.config.limits.max_active
         ):
+            LOGGER.info("connection_rejected result=capacity")
             self.metrics.increment("capacity_rejected")
             writer.close()
             return
@@ -91,6 +105,7 @@ class GatewayServer:
         self.metrics.pending_sessions += 1
         inbound: SecureSession | None = None
         activated = False
+        LOGGER.info("client_connection_received")
         try:
             try:
                 async with asyncio.timeout(self.config.session.handshake_timeout_seconds):
@@ -110,6 +125,7 @@ class GatewayServer:
             self._active += 1
             self.metrics.active_sessions += 1
             activated = True
+            LOGGER.info("client_authenticated")
             await self._serve(inbound)
         except asyncio.CancelledError:
             raise
@@ -134,6 +150,7 @@ class GatewayServer:
                     self.metrics.active_sessions -= 1
                 writer.close()
                 self._connections.discard(current)
+                LOGGER.info("client_connection_closed")
 
     async def _close_session(self, session: SecureSession) -> None:
         try:
@@ -336,6 +353,7 @@ class GatewayServer:
             async with asyncio.timeout_at(item.deadline):
                 self._opening += 1
                 try:
+                    LOGGER.info("upstream_connecting audit_id=%s", item.audit_id)
                     async with asyncio.timeout(self.config.session.handshake_timeout_seconds):
                         upstream = await self.manager.open(self.config.upstream)
                 finally:
@@ -347,6 +365,7 @@ class GatewayServer:
                     or upstream.peer != self.config.upstream
                 ):
                     raise AuthenticationError("upstream session is not authorized")
+                LOGGER.info("upstream_authenticated audit_id=%s", item.audit_id)
                 for record in item.records:
                     await upstream.send(
                         RecordType.REQUEST,
@@ -355,6 +374,12 @@ class GatewayServer:
                         chunk_index=record.header.chunk_index,
                         end_of_message=record.header.end_of_message,
                     )
+                LOGGER.info(
+                    "request_forwarded audit_id=%s fragments=%d bytes=%d",
+                    item.audit_id,
+                    len(item.records),
+                    item.payload_size,
+                )
                 index = 0
                 while True:
                     response = await upstream.recv()
@@ -375,6 +400,8 @@ class GatewayServer:
                         raise CapacityError("response record limit exceeded")
                     if not response.plaintext and not header.end_of_message:
                         raise ProtocolError("empty intermediate response")
+                    if index == 0:
+                        LOGGER.info("response_started audit_id=%s", item.audit_id)
                     response_size += len(response.plaintext)
                     if response_size > self.config.limits.max_response_body_bytes:
                         raise CapacityError("response body limit exceeded")

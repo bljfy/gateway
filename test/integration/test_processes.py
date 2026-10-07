@@ -11,6 +11,7 @@ import pytest
 
 from gateway.crypto import GmSSLBackend
 from gateway.runtime import prepare_demo
+from test.fixtures.simulator_output import response_body
 from test.integration.test_topology import ports
 
 
@@ -86,8 +87,9 @@ async def test_three_process_cli_roundtrip_metrics_and_shutdown(
                 timeout=10,
                 creationflags=flags,
             )
-            assert result.returncode == 0 and result.stderr == ""
-            assert result.stdout == f"[mock:m] {prompt}\n"
+            assert result.returncode == 0 and "client_completed" in result.stderr
+            assert marker not in result.stderr
+            assert response_body(result.stdout) == f"[mock:m] {prompt}\n"
         reader, writer = await asyncio.open_connection("127.0.0.1", mp)
         writer.write(b"GET /metrics HTTP/1.1\r\nHost: localhost\r\n\r\n")
         await writer.drain()
@@ -102,7 +104,10 @@ async def test_three_process_cli_roundtrip_metrics_and_shutdown(
         for process in reversed(processes):
             try:
                 _, errors = await asyncio.wait_for(asyncio.to_thread(process.communicate), 5)
-                assert process.returncode == 0 and errors == ""
+                assert process.returncode == 0 and "server_stopped" in errors
+                assert "synthetic-process-private-marker" not in errors
+                if process is processes[1]:
+                    assert "request_forwarded" in errors and "request_finished result=ok" in errors
             finally:
                 if process.poll() is None:
                     process.kill()
