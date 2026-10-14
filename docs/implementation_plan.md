@@ -174,6 +174,8 @@ GCM nonce 不允许在同一密钥下重复。断线恢复必须建立新会话�
 
 ## 9. 配置与隐私化审计
 
+现有运行入口已接入 `gateway.logging` 的固定事件、字段校验与脱敏保护；实际日志配置为 TOML `[gateway].log_level`，默认 INFO，支持五个标准级别。运行日志阈值独立于有界审计队列。实际模式、嵌入式 API 与保护范围见 [配置说明](configuration.md#隐私审计与健康状态)。日志模块不承担第 8 节的密钥生命周期管理。
+
 建议初始配置：
 
 ```toml
@@ -232,6 +234,7 @@ src/gateway/
   framing.py    # 逻辑消息在记录之间的分片与组装
   config.py
   audit.py
+  logging.py    # 运行日志白名单、脱敏、级别与控制台输出
   metrics.py
   cli.py
 

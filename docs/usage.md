@@ -79,7 +79,14 @@ CLI 的过程日志写入 stderr，响应写入 stdout。网关显示 `server_st
 .\.venv\Scripts\guomi-gateway.exe --quiet demo --prompt "你好"
 ```
 
-`--quiet` 隐藏 INFO 过程日志，审计文件继续写入，失败仍返回非零退出码。Python 编程接口使用标准 logging，由调用方配置日志级别与处理器。
+编辑共享的 `.tools/demo/gateway.toml` 可调整启动日志阈值：
+
+```toml
+[gateway]
+log_level = "WARNING"
+```
+
+在已有 `[gateway]` 表中添加或修改该字段，保留其他设置，然后重启角色进程。默认 `INFO`，支持 `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`。`--quiet` 额外过滤 ERROR 以下过程日志，审计文件继续写入，失败仍返回非零退出码。Python 编程接口使用 `gateway.logging.EventLogger`；调用方通过 `set_log_level(config.log_level)` 设置阈值，并使用默认绑定 `PrivacyFormatter` 的 `PrivacyStreamHandler`，或使用 `console_logging()` 上下文。接口、字段约束和保护范围见 [配置说明](configuration.md#隐私审计与健康状态)。
 
 ## 16 KiB 手动测试
 

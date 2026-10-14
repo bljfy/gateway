@@ -23,6 +23,7 @@ audit_capacity = 1024
 security_audit_capacity = 128
 metrics_host = "127.0.0.1"
 metrics_port = 9100
+log_level = "INFO"
 
 [session]
 handshake_timeout_seconds = 5
@@ -126,7 +127,15 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 
 ## 隐私审计与健康状态
 
-CLI 默认在 stderr 显示启动、认证、请求转发、响应开始、完成或失败和停机过程，采用标准 logging。网关过程日志使用固定事件名、独立审计 UUID、字节数与耗时，不记录业务正文或密钥；`guomi-gateway --quiet gateway` 可隐藏 INFO 日志，JSONL 审计继续执行。客户端日志中的业务 UUID 与响应一致；网关日志中的 `audit_id` 与 JSONL 的审计 UUID 对应。输出示例见 [使用说明](usage.md#响应标识与运行日志)。
+CLI 在 stderr 显示启动、认证、转发及停机过程，使用 `gateway.logging` 封装标准库 logging。共享 TOML 的 `[gateway].log_level` 支持 `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`，默认 `INFO`；大小写错误、未知级别和非字符串值拒绝启动，错误不回显配置内容。客户端、网关、模拟器与 demo 启动时应用配置；demo 使用客户端加载的共享配置。配置在重启时生效。`--quiet` 额外过滤 ERROR 以下的控制台日志；有效阈值为配置级别和 ERROR 中较高者。JSONL 审计不受过程日志阈值影响。
+
+运行日志只接纳 `LOG_EVENTS` 中的固定事件。元数据允许 UUID 类型的 `request_id` / `audit_id`、有限的字节数、分片数、端口和耗时、布尔 `stream`、固定角色与结果、IP 字面量；主机名及带作用域的 IPv6 地址脱敏。敏感字段（密钥、口令、令牌、提示词、检索片段、输出、请求/响应对象、异常等）输出 `[REDACTED]`；未知字段连字段名一并丢弃，非法元数据值脱敏，未知事件变为 `log_rejected`。不截取正文片段，不对任意对象调用 `repr` / `str`，不序列化嵌套载荷。所有级别执行同一规则。
+
+业务代码使用 `EventLogger(__name__).info("request_finished", result="ok", bytes=1024)`，五个级别均有同名方法，也可使用 `log("DEBUG", event, **fields)`。脱敏在创建 LogRecord 前完成，因此自定义处理器收到的也是已过滤消息。CLI 的 `PrivacyFormatter` 再校验输出，屏蔽自由文本、格式化参数、extra、异常栈和调用栈；CLI 隔离 gateway 父级处理器与 root 传播，退出后恢复原状态。嵌入式调用方负责处理器配置；原始标准 logging 调用使用 `PrivacyStreamHandler`（默认绑定 `PrivacyFormatter`），单独绑定 formatter 到普通处理器不能保护写入失败的诊断输出。第三方日志、print、绕过入口自行安装的子 logger 处理器和业务 stdout 不在此模块保护范围内。调用方只能在允许的元数据字段填写其实际含义，不得把秘密编码成 UUID 或数字。
+
+控制台输出失败时，`PrivacyStreamHandler` 只尝试向 stderr 写入固定的 `log output failed`，不输出原始记录或存储异常；该过程日志错误不会改变审计队列的健康状态。嵌入式调用者需要自行安排其他处理器的写入故障处理，流式输出可复用此处理器。
+
+客户端日志中的业务 UUID 与响应一致；网关的独立 `audit_id` 对应 JSONL 审计 UUID。运行日志和 `PrivacyAudit` 负责输出约束，密钥生成、内存存储、使用、重新握手更新与清理由 `crypto/`、`session/` 实现；本次日志改动不实现或证明整个密钥生命周期，也不提供 Python / 原生副本完全清零保证。输出方式见 [使用说明](usage.md#响应标识与运行日志)。
 
 `publish(AuditEvent)` 无阻塞且有界。仅允许固定事件代码、结果类别、UUID、有限非负耗时及字节数；
 逐字段构造 JSON，不序列化任意对象或异常。B 为审计另生成 UUID，不输出客户端提供的请求 UUID。

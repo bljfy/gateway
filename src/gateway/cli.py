@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
 
 from gateway.contracts import GatewayError, InferenceRequest, PeerRole
+from gateway.logging import console_logging, set_log_level
 from gateway.runtime import (
     Runtime,
     load_runtime,
@@ -158,6 +157,7 @@ def _demo(args: argparse.Namespace) -> int:
         try:
             for role in (PeerRole.SIMULATOR, PeerRole.GATEWAY, PeerRole.CLIENT):
                 runtimes.append(load_runtime(args.directory / f"{role.value}.json", role))
+            set_log_level(runtimes[2].gateway.log_level)
             for runtime in runtimes[:2]:
                 ready = asyncio.Event()
                 server = asyncio.create_task(run_server(runtime, ready=ready.set))
@@ -198,6 +198,7 @@ def _init_demo(args: argparse.Namespace) -> int:
 
 def _server(args: argparse.Namespace) -> int:
     runtime = load_runtime(args.config, PeerRole(args.command))
+    set_log_level(runtime.gateway.log_level)
 
     async def run() -> None:
         stop = asyncio.Event()
@@ -224,6 +225,7 @@ def _server(args: argparse.Namespace) -> int:
 
 def _client(args: argparse.Namespace) -> int:
     runtime = load_runtime(args.config, PeerRole.CLIENT)
+    set_log_level(runtime.gateway.log_level)
     request = _request(args)
     asyncio.run(run_client(runtime, request, stream=args.stream, write=sys.stdout.write))
     return 0
@@ -232,28 +234,14 @@ def _client(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     func: Callable[[argparse.Namespace], int] = args.func
-    logger = logging.getLogger("gateway")
-    previous_level = logger.level
-    handler = logging.StreamHandler(sys.stderr)
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s %(message)s", datefmt="%Y-%m-%dT%H:%M:%SZ"
-    )
-    formatter.converter = time.gmtime
-    handler.setFormatter(formatter)
-    handler.setLevel(logging.ERROR if args.quiet else logging.INFO)
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-    try:
-        return func(args)
-    except KeyboardInterrupt:
-        return 130
-    except (GatewayError, ValueError, OSError, TimeoutError, subprocess.CalledProcessError):
-        print("command failed", file=sys.stderr)
-        return 1
-    finally:
-        logger.removeHandler(handler)
-        logger.setLevel(previous_level)
-        handler.close()
+    with console_logging(quiet=args.quiet):
+        try:
+            return func(args)
+        except KeyboardInterrupt:
+            return 130
+        except (GatewayError, ValueError, OSError, TimeoutError, subprocess.CalledProcessError):
+            print("command failed", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

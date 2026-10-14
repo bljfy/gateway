@@ -3,7 +3,6 @@
 import asyncio
 import getpass
 import json
-import logging
 import os
 import subprocess
 from collections.abc import Callable
@@ -17,12 +16,13 @@ from gateway.client import InferenceClient
 from gateway.config import GatewayConfig, load_config, positive
 from gateway.contracts import GatewayError, InferenceRequest, PeerIdentity, PeerRole, SecureSession
 from gateway.crypto import GmSSLBackend
+from gateway.logging import EventLogger
 from gateway.metrics import Metrics, start_metrics_server
 from gateway.server import GatewayServer
 from gateway.session import LocalIdentity, SecuritySessionManager, TrustRecord
 from gateway.simulator import InferenceSimulator
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = EventLogger(__name__)
 
 
 def read_bounded(path: Path, limit: int) -> bytes:
@@ -230,6 +230,7 @@ def prepare_demo(
             target.chmod(0o600)
     (directory / "gateway.toml").write_text(
         f'[upstream]\npeer_id="simulator"\n[gateway]\nmetrics_port={metrics_port}\n'
+        'log_level="INFO"\n'
         "[limits]\nmax_queued_bytes_per_session=2097152\n",
         encoding="utf-8",
     )
@@ -330,15 +331,15 @@ async def run_server(
                 port=runtime.gateway.metrics_port,
             )
         listener = await asyncio.start_server(handle, *runtime.listen)
-        LOGGER.info("server_started role=%s host=%s port=%d", role, *runtime.listen)
+        LOGGER.info("server_started", role=role, host=runtime.listen[0], port=runtime.listen[1])
         if ready:
             ready()
         await (stop.wait() if stop is not None else listener.serve_forever())
     except Exception:
-        LOGGER.error("server_failed role=%s", role)
+        LOGGER.error("server_failed", role=role)
         raise
     finally:
-        LOGGER.info("server_stopping role=%s", role)
+        LOGGER.info("server_stopping", role=role)
         if listener:
             listener.close()
         if metrics_server:
@@ -358,7 +359,7 @@ async def run_server(
             await listener.wait_closed()
         if metrics_server:
             await metrics_server.wait_closed()
-        LOGGER.info("server_stopped role=%s", role)
+        LOGGER.info("server_stopped", role=role)
 
 
 async def run_client(
@@ -368,10 +369,10 @@ async def run_client(
     try:
         if runtime.target is None:
             raise GatewayError("client target missing")
-        LOGGER.info("client_connecting request_id=%s stream=%s", request.request_id, stream)
+        LOGGER.info("client_connecting", request_id=request.request_id, stream=stream)
         async with asyncio.timeout(runtime.gateway.limits.request_timeout_seconds):
             session = await runtime.manager.open(runtime.target)
-            LOGGER.info("client_authenticated request_id=%s", request.request_id)
+            LOGGER.info("client_authenticated", request_id=request.request_id)
             client = InferenceClient(session, runtime.gateway.limits)
             if stream:
                 async for chunk in client.stream(request):
@@ -379,9 +380,9 @@ async def run_client(
                 write("\n")
             else:
                 write((await client.complete(request)).output + "\n")
-            LOGGER.info("client_completed request_id=%s", request.request_id)
+            LOGGER.info("client_completed", request_id=request.request_id)
     except Exception:
-        LOGGER.error("client_failed request_id=%s", request.request_id)
+        LOGGER.error("client_failed", request_id=request.request_id)
         raise
     finally:
         if session:

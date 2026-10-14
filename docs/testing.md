@@ -28,6 +28,10 @@ uv run --locked pytest test/ -m "not e2e"
 
 ## 本地端到端验证
 
+运行日志回归位于 `test/unit/gateway/test_logging.py`：输入为合成密钥、提示词、嵌套检索片段和输出标记，以及含标记的异常、自由文本、非法元数据和未知配置。判定为五个日志级别均无敏感标记、合法元数据保留、级别阈值正确、非法配置只返回固定错误、CLI 四个入口应用配置且退出恢复 logging 状态。既检查格式化输出，也检查处理器接收的 LogRecord；审计写入不受日志阈值影响。测试不证明密钥销毁或生命周期的完整实现。
+
+2026-10-14 在 Windows / Python 3.12.11 / GmSSL 3.1.1 执行日志改动的全量非 e2e 回归：351 项通过，5 项 Linux bootstrap 用例因未配置 Git Bash 跳过；新增日志用例 45 项通过。Ruff check、format --check、mypy 和 diff 空白检查通过，包含真实双链路和三进程 CLI 验证。测试使用 `--basetemp=.tools/pytest-final` 将临时数据隔离到任务工作区；JUnit 和网关 JSON 报告保存在本地忽略目录。控制台写入失败用合成 OSError 验证固定诊断无敏感信息。
+
 `test/integration/` 使用真实 GmSSL、临时生成的 SM2 身份和回环 TCP，包括三个独立 CLI 进程；属于本地测试，随全量非外部测试执行。必须先配置已校验原生库的 `GMSSL_LIBRARY`、`GMSSL_SHA256` 和加载路径，缺失时集成测试失败，不跳过。原生环境步骤见 [协议说明](protocol.md#原生环境)。
 
 ```powershell

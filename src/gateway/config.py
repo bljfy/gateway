@@ -6,6 +6,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from gateway.contracts import MAX_RECORD_PLAINTEXT, PeerIdentity, PeerRole, SessionPolicy
+from gateway.logging import validate_level
 
 
 def positive(value: object, name: str) -> int:
@@ -53,8 +54,10 @@ class GatewayConfig:
     security_audit_capacity: int = 128
     metrics_host: str = "127.0.0.1"
     metrics_port: int = 9100
+    log_level: str = "INFO"
 
     def __post_init__(self) -> None:
+        validate_level(self.log_level)
         if self.upstream.role is not PeerRole.SIMULATOR:
             raise ValueError("upstream must have simulator role")
         if self.suite != "SM2-SM4-GCM-SM3-v1" or type(self.tag_bytes) is not int:
@@ -125,6 +128,7 @@ def load_config(path: Path) -> GatewayConfig:
             metrics_port=positive(
                 options.get("metrics_port", defaults.metrics_port), "metrics_port"
             ),
+            log_level=validate_level(options.get("log_level", defaults.log_level)),
         )
     except (ValueError, TypeError, OSError):
         raise ValueError("invalid gateway configuration") from None
