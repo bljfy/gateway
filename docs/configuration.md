@@ -128,9 +128,11 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 
 ## 模型连接配置
 
+WebUI 的非敏感端点设置单独保存为身份 JSON 同目录下的 `<名称>.webui.json`，不覆盖原身份、公钥和信任记录。加载、覆盖范围、IP／端口校验及停机后重载规则见 [WebUI 配置](webui.md#配置与生命周期)。
+
 adapter.json 新增顶层 provider、base_url、api_key_env，默认分别为 deepseek、https://api.deepseek.com、DEEPSEEK_API_KEY。其他角色不接受这些字段。未知 provider、非法 URL 或环境变量名拒绝加载；仅 adapter 创建 provider 时读取凭据，缺失或空值拒绝启动。
 
-CLI 的 adapter、demo、infer 和 init-demo 在执行命令前加载当前工作目录的 `.env`，已有进程环境变量优先，变量值不做插值；gateway、client 不加载该文件。`.env` 不随 `--config` 或 `--directory` 改变查找位置。自定义 `api_key_env` 时，应在进程环境或 `.env` 中提供同名变量；直接使用 Python 接口的调用方须自行加载环境。文件格式与凭据设置见 [使用说明](usage.md#环境与凭据)。
+CLI 的 adapter、demo、infer、init-demo 和 webui 在执行命令前加载当前工作目录的 `.env`，已有进程环境变量优先，变量值不做插值；原 gateway、client 命令不加载该文件。`.env` 不随 `--config` 或 `--directory` 改变查找位置。自定义 `api_key_env` 时，应在进程环境或 `.env` 中提供同名变量；直接使用 Python 接口的调用方须自行加载环境。文件格式与凭据设置见 [使用说明](usage.md#环境与凭据)。
 
 base_url 必须为 HTTPS，禁止 URL 凭据、查询和片段；仅回环 IP 可使用 HTTP 供本地测试。DEEPSEEK_BASE_URL 只影响 infer 和新生成的演示配置，已有 JSON 使用固定 base_url。SDK 使用系统证书和环境代理；失败返回固定错误。默认 deepseek-flash、关闭思考模式，max_output_tokens 为真实 token 上限。SDK 禁用重试，沿用 120 秒绝对业务截止，停机关闭 HTTP 流和客户端。
 

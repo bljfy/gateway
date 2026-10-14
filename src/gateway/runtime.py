@@ -6,12 +6,13 @@ import json
 import os
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TextIO, cast
 from uuid import uuid4
 
 from gateway.adapter import AdapterConfig, AdapterServer, ModelProvider, create_provider
+from gateway.adapter.server import AdapterMetrics
 from gateway.audit import PrivacyAudit
 from gateway.client import InferenceClient
 from gateway.config import GatewayConfig, load_config, positive
@@ -78,7 +79,38 @@ class Runtime:
     adapter_config: AdapterConfig | None = None
 
 
-def load_runtime(path: Path, role: PeerRole) -> Runtime:
+@dataclass(frozen=True, slots=True)
+class RuntimeOverrides:
+    """仅覆盖本地端点；身份、公钥和信任策略仍来自原配置。"""
+
+    listen: tuple[str, int] | None = None
+    target_id: str | None = None
+    target_address: tuple[str, int] | None = None
+    adapter_config: AdapterConfig | None = None
+
+
+@dataclass(slots=True)
+class RuntimeStatus:
+    """进程内只读展示来源，不包含业务正文或密钥。"""
+
+    metrics: Metrics = field(default_factory=Metrics)
+    adapter: AdapterMetrics = field(default_factory=AdapterMetrics)
+    audit: PrivacyAudit | None = None
+    authenticated_sessions: int = 0
+
+    def snapshot(self, runtime: Runtime) -> dict[str, object]:
+        result: dict[str, object] = dict(runtime.manager.session_counts())
+        result["authenticated_sessions_total"] = self.authenticated_sessions
+        if runtime.manager.local.peer.role is PeerRole.GATEWAY:
+            result.update(self.metrics.snapshot(self.audit))
+        else:
+            result.update(self.adapter.snapshot())
+        return result
+
+
+def load_runtime(
+    path: Path, role: PeerRole, *, overrides: RuntimeOverrides | None = None
+) -> Runtime:
     """Strict, size-bounded local config. All failures omit paths and key material."""
     try:
         base = path.resolve().parent
@@ -175,6 +207,35 @@ def load_runtime(path: Path, role: PeerRole) -> Runtime:
         port = positive(data.get("port", 1), "port")
         if port > 65535:
             raise ValueError("invalid listen port")
+        if overrides is not None:
+            if overrides.listen is not None:
+                if role is PeerRole.CLIENT:
+                    raise ValueError("client has no listener")
+                host, port = overrides.listen
+            if overrides.adapter_config is not None:
+                if role is not PeerRole.ADAPTER:
+                    raise ValueError("provider override requires adapter")
+                adapter_config = overrides.adapter_config
+            if overrides.target_id is not None or overrides.target_address is not None:
+                expected_role = {
+                    PeerRole.CLIENT: PeerRole.GATEWAY,
+                    PeerRole.GATEWAY: PeerRole.ADAPTER,
+                }.get(role)
+                trusted_target = trust[_text(overrides.target_id)]
+                if expected_role is None or trusted_target.peer.role is not expected_role:
+                    raise ValueError("invalid target role")
+                if not trusted_target.enabled:
+                    raise ValueError("target disabled")
+                if overrides.target_address is not None:
+                    trust[trusted_target.peer.peer_id] = replace(
+                        trusted_target, address=overrides.target_address
+                    )
+                if role is PeerRole.CLIENT:
+                    target = trusted_target.peer
+                else:
+                    config = replace(config, upstream=trusted_target.peer)
+        if type(host) is not str or not host or type(port) is not int or not 1 <= port <= 65535:
+            raise ValueError("invalid listener")
         limits = config.limits
         # A's wire frame maximum is fixed at 131072; reject unsupported overrides.
         if limits.max_wire_frame_bytes != 131072:
@@ -303,6 +364,7 @@ async def run_server(
     stop: asyncio.Event | None = None,
     ready: Callable[[], None] | None = None,
     provider: ModelProvider | None = None,
+    status: RuntimeStatus | None = None,
 ) -> None:
     manager = runtime.manager
     role = manager.local.peer.role.value
@@ -312,7 +374,9 @@ async def run_server(
     drain_task: asyncio.Task[None] | None = None
     audit_output: TextIO | None = None
     audit = PrivacyAudit(runtime.gateway.audit_capacity, runtime.gateway.security_audit_capacity)
-    relay = GatewayServer(manager, runtime.gateway, audit, Metrics())
+    status = status if status is not None else RuntimeStatus()
+    status.audit = audit
+    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics)
     adapter: AdapterServer | None = None
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -326,6 +390,8 @@ async def run_server(
             else:
                 assert adapter is not None
                 session = await manager.accept(reader, writer)
+                status.authenticated_sessions += 1
+                LOGGER.info("adapter_authenticated", role=role)
                 await adapter.serve(session)
         except (GatewayError, OSError, TimeoutError):
             pass
@@ -353,7 +419,7 @@ async def run_server(
                 if runtime.adapter_config is None:
                     raise GatewayError("adapter configuration missing")
                 provider = create_provider(runtime.adapter_config, runtime.gateway.limits)
-            adapter = AdapterServer(provider, limits=runtime.gateway.limits)
+            adapter = AdapterServer(provider, limits=runtime.gateway.limits, metrics=status.adapter)
         elif manager.local.peer.role is not PeerRole.GATEWAY:
             raise GatewayError("invalid server role")
         if manager.local.peer.role is PeerRole.GATEWAY:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import aclosing
+from dataclasses import dataclass
 
 from gateway.adapter.provider import ModelProvider
 from gateway.codec import decode_request, encode_response
@@ -22,12 +23,37 @@ from gateway.contracts import (
 from gateway.framing import recv_business_record, recv_message, send_message, split_payload
 
 
+@dataclass(slots=True)
+class AdapterMetrics:
+    """业务响应计数；没有请求正文和模型输出。"""
+
+    inflight: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+    def snapshot(self) -> dict[str, int]:
+        return {
+            "requests_inflight": self.inflight,
+            "requests_completed_total": self.completed,
+            "requests_failed_total": self.failed,
+            "requests_cancelled_total": self.cancelled,
+        }
+
+
 class AdapterServer:
     """Serve authenticated requests using an injected model provider."""
 
-    def __init__(self, provider: ModelProvider, *, limits: Limits | None = None) -> None:
+    def __init__(
+        self,
+        provider: ModelProvider,
+        *,
+        limits: Limits | None = None,
+        metrics: AdapterMetrics | None = None,
+    ) -> None:
         self._provider = provider
         self._limits = limits if limits is not None else Limits()
+        self.metrics = metrics if metrics is not None else AdapterMetrics()
 
     async def complete(self, request: InferenceRequest) -> InferenceResponse:
         return await self._provider.complete(request)
@@ -96,8 +122,19 @@ class AdapterServer:
     async def _respond(
         self, session: SecureSession, request: InferenceRequest, stream: bool, deadline: float
     ) -> None:
-        async with asyncio.timeout_at(deadline):
-            await self._respond_message(session, request, stream)
+        self.metrics.inflight += 1
+        try:
+            async with asyncio.timeout_at(deadline):
+                await self._respond_message(session, request, stream)
+            self.metrics.completed += 1
+        except asyncio.CancelledError:
+            self.metrics.cancelled += 1
+            raise
+        except Exception:
+            self.metrics.failed += 1
+            raise
+        finally:
+            self.metrics.inflight -= 1
 
     async def _respond_message(
         self, session: SecureSession, request: InferenceRequest, stream: bool

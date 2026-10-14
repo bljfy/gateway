@@ -13,7 +13,7 @@ DEEPSEEK_API_KEY=你的DeepSeek_API_Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-adapter、demo、infer 和 init-demo 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。已有 adapter JSON 仍使用自身 base_url，地址变更需更新配置。
+adapter、demo、infer、init-demo 和 webui 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。已有 adapter JSON 仍使用自身 base_url，WebUI 可在旁文件保存地址覆盖。
 
 也可以在运行 adapter、demo 或 infer 的终端设置模型凭据：
 
@@ -36,6 +36,8 @@ Linux 使用 `export DEEPSEEK_API_KEY='<你的 DeepSeek API Key>'`。凭据不�
 再次运行复用身份和配置；已有目录不完整时拒绝启动。`--directory`、`--manifest` 可指定位置，`--gateway-port`、`--adapter-port`、`--metrics-port` 仅在新建目录时生效。结束、失败或 Ctrl+C 时清理服务、HTTP 客户端、会话和审计。审计保留在 `.tools/demo/audit.jsonl`。
 
 ## 三程序运行
+
+需要浏览器操作时，使用 `guomi-gateway webui --role client|gateway|adapter`。三个角色分别拥有独立页面、配置和生命周期，操作与三机部署步骤见 [WebUI 使用说明](webui.md)。原有 CLI 命令继续可用，避免同一角色的 CLI 与 WebUI 同时占用相同业务端口。
 
 先生成新目录的配置：
 
