@@ -640,6 +640,13 @@ class SecuritySessionManager:
             finally:
                 self._native_tasks.discard(task)
 
+    def session_counts(self) -> dict[str, int]:
+        """只暴露会话数量，不暴露会话标识、密钥或记录内容。"""
+        return {
+            "active_sessions": sum(s.state is SessionState.ACTIVE for s in self._sessions),
+            "pending_sessions": self._pending,
+        }
+
     def _trust(self, peer: PeerIdentity, *, outbound: bool) -> TrustRecord:
         # 信任有效期使用墙上时钟；角色只允许 client→gateway→adapter 两段链路。
         entry = self.trust.get(peer.peer_id)

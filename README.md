@@ -37,9 +37,21 @@ Linux 启动前设置 [原生库加载路径](docs/protocol.md#原生环境)。�
 
 默认模型为 `deepseek-flash`，关闭思考模式。`--model` 可指定模型，`--max-output-tokens` 为真实输出 token 上限，默认 512。响应以 UTC 时间戳和请求 UUID 的 JSON 行开头，随后为模型回答。`--quiet` 放在子命令前可隐藏过程日志。
 
+也可在命令执行目录创建 `.env`，填写 `DEEPSEEK_API_KEY` 和可选的 `DEEPSEEK_BASE_URL`，格式见 [环境与凭据](docs/usage.md#环境与凭据)。adapter、demo、infer、init-demo 和 webui 自动加载该文件，已有进程环境变量优先；已有 adapter 配置使用 JSON 中的 `base_url`，WebUI 可保存端点覆盖。
+
 `demo` 首次生成本地身份和配置，启动 adapter 与网关，发送请求后关闭服务；再次运行复用配置。已有旧配置先按 [迁移说明](docs/deployment.md#从模拟服务迁移) 更新。
 
 ## 独立程序与直接推理
+
+三个角色各有本地中文 WebUI。先初始化身份，再在各角色的终端运行：
+
+```powershell
+.\.venv\Scripts\guomi-gateway.exe webui --role client
+.\.venv\Scripts\guomi-gateway.exe webui --role gateway
+.\.venv\Scripts\guomi-gateway.exe webui --role adapter
+```
+
+本机浏览器分别打开 `http://127.0.0.1:18080`、`:18081`、`:18082`。页面加载现有身份、保存连接地址，启动 adapter 与网关后，在客户端执行普通或流式推理。UI 启动不自动启动业务服务。局域网实验在每台角色主机本地打开 UI，角色之间继续使用国密协议；浏览器回环段使用 HTTP。详细步骤见 [WebUI 使用说明](docs/webui.md)。
 
 ```powershell
 .\.venv\Scripts\guomi-gateway.exe init-demo
@@ -83,10 +95,13 @@ sequenceDiagram
 
 ## 文档与源码
 
+2026-10-14 已完成真实 DeepSeek 三进程普通与流式请求复测，核对响应 UUID、成功审计及停机端口释放。首次请求曾失败，根因未确认；此次验证不代表稳定性、长负载或生产验收通过，详情见 [真实三进程验证](docs/integration_report.md#deepseek-真实三进程验证)。
+
 - [实现方案](docs/implementation_plan.md)：架构、安全边界、开发职责与验收。
 - [公共接口](docs/interfaces.md)：契约 2.0、adapter 和 provider 扩展接口。
 - [配置说明](docs/configuration.md)：信任、资源限额和模型连接配置。
 - [使用说明](docs/usage.md)：演示、独立运行及编程接口。
+- [三角色 WebUI](docs/webui.md)：页面操作、局域网部署、安全边界与本地控制接口。
 - [部署与迁移](docs/deployment.md)：旧角色配置迁移、凭据和回滚。
 - [安全协议](docs/protocol.md)：国密记录与原生环境。
 - [开发指南](docs/developer_guide.md)、[依赖管理](docs/dependencies.md)、[测试规范](docs/testing.md)。

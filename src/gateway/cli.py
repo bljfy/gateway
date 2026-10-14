@@ -25,6 +25,7 @@ from gateway.runtime import (
     run_client,
     run_server,
 )
+from gateway.webui.server import run_webui
 
 DEMO_DIRECTORY = Path(".tools/demo")
 NATIVE_MANIFEST = Path(".tools/gmssl/manifest.json")
@@ -121,7 +122,18 @@ def build_parser() -> argparse.ArgumentParser:
     quick.add_argument("--metrics-port", type=_positive_int, default=19100)
     _request_options(quick, required=False)
     quick.set_defaults(func=_demo)
+    ui = subparsers.add_parser("webui", help="run a local browser UI for one role")
+    ui.add_argument("--role", choices=[role.value for role in PeerRole], required=True)
+    ui.add_argument("--config", type=Path, help="local identity configuration")
+    ui.add_argument("--port", type=_positive_int, help="loopback WebUI port")
+    ui.set_defaults(func=_webui)
     return parser
+
+
+def _webui(args: argparse.Namespace) -> int:
+    role = PeerRole(args.role)
+    run_webui(role, args.config or DEMO_DIRECTORY / f"{role.value}.json", args.port)
+    return 0
 
 
 def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None:
@@ -247,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     func: Callable[[argparse.Namespace], int] = args.func
     with console_logging(quiet=args.quiet):
         try:
-            if args.command in {"adapter", "demo", "infer", "init-demo"}:
+            if args.command in {"adapter", "demo", "infer", "init-demo", "webui"}:
                 load_dotenv(Path(".env"), override=False, interpolate=False)
             return func(args)
         except KeyboardInterrupt:

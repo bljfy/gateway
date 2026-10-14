@@ -1,5 +1,17 @@
 # 测试规范
 
+## WebUI 验证
+
+Markdown 与元数据展示的前端回归使用 `node test/frontend/test_output.cjs`，无需 npm 安装。覆盖普通／流式、多处分片及逐字符首行、无换行 JSON、取消／失败时部分前缀、标题列表表格代码、危险 HTML／链接与图片外联。Node 仅为此独立开发测试提供 JavaScript 运行时，不是部署依赖。
+
+新增 `test/unit/application/test_webui.py` 与 `test/integration/test_webui.py`，测试本地 HTTP／WebSocket 控制接口、Host／Origin／请求标识、配置旁文件恢复、字段和角色拒绝、认证失败、端口占用、普通／流式 Unicode 与检索片段、UUID、输出隔离、生命周期及取消清理。测试身份运行时生成，模型使用回环 SDK API 或 test/ 内 provider；不调用真实模型。
+
+```powershell
+uv run --locked pytest test/unit/application/test_webui.py test/integration/test_webui.py -m "not e2e"
+```
+
+先按下文配置已校验 GmSSL 环境。集成测试包含页面断开时 HTTP handler 再次取消的清理回归、协程尚未开始时取消、凭据缺失、WebSocket 容量及 HTTP 请求大小限额。浏览器验收使用三个独立 WebUI CLI 进程和回环模型替身，检查配置保存、认证、普通／流式结果、部分输出取消、复制／清空、非法端口提示及网关／adapter 重启。实测结果与平台限制见 [WebUI 补充验证](integration_report.md#webui-补充验证)。
+
 ## Adapter 验证
 
 当前角色链路为 client→gateway→adapter。普通本地回归使用真实 GmSSL 和注入的测试 provider；CLI 与 SDK 测试使用 test/fixtures/model_api.py 提供的回环 HTTP/SSE，合成凭据由测试夹具设置并隔离环境代理。它们验证模型接口接线、取消与安全链路，不证明 DeepSeek 远端服务可用。

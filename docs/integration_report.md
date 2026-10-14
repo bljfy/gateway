@@ -1,5 +1,25 @@
 # 三程序整合报告
 
+## Markdown 展示补充验证
+
+2026-10-14，基准 `d5c2cd9`，客户端推理结果新增本地 Markdown 渲染、元数据首行隐藏和只复制正文。Node 24 的独立前端回归 **27 场景通过**，包括元数据逐字符与所有切分边界、空分片、CRLF、无换行普通 JSON、部分流取消、HTML 转义、危险链接与图片外联。WebUI 单元／真实国密集成回归 **30 通过**；完整非 e2e 回归 **425 通过、5 跳过、1 排除，156.53 秒**。跳过项仍为未配置 Git Bash 的 Linux bootstrap。Ruff check、format --check、mypy 及 diff 空白检查通过。
+
+浏览器使用隔离本机 WebUI 与真实双国密链路，注入合成 Markdown provider，未访问外部模型。观察普通／流式标题、粗体、列表、表格、代码块和引用；逐字符首行期间结果为空，结束后结果区无元数据 JSON 或独立 UUID。复制内容保留 Markdown 标记且不含元数据，HTML 脚本作为文字显示，无脚本对话框。局部回答取消时保留正文并标记未完成。测试没有中断用户原有运行服务。
+
+报告为本地 `artifacts/markdown-full-junit.xml` 与 `artifacts/markdown-webui-junit.xml`；Node 命令和范围见 [测试规范](testing.md#webui-验证)，第三方资源固定版本与许可见 [资源说明](third_party.md)。本轮未执行 Linux、真实模型、长期前端负载或三机局域网验证。
+
+## WebUI 补充验证
+
+2026-10-14，从基准 `4f3c168` 新增三个角色独立 WebUI。本轮 Windows x86_64 / Python 3.12.11 / uv 0.8.22 / aiohttp 3.14.5 / GmSSL 3.1.1 验证：完整非 e2e 回归 **425 通过、5 跳过、1 外部测试排除，140.08 秒**；新增 WebUI 两个测试文件共 30 项通过。跳过项为未配置 Git Bash 的 Linux bootstrap。Ruff check、format --check（src/test/scripts）、mypy（src/scripts）及 diff 空白检查通过。
+
+本机首次使用 MSVC 构建的 GmSSL 在原生 SM4 CTR update 自测失败，未作为验证库使用。改用 MinGW 13.1.0 构建固定校验源码后，SM2、SM3、SM4 三项原生自测通过；使用 DLL SHA256 `f144de5862daa8b436e3b8d0ace69c8ffb574ffba7916d837d36d23965faba74` 执行本轮回归。该记录是本轮环境选择，不修改原生源码或替换历史验证结论。
+
+普通与流式用例通过两个真实 SM2／SM4-GCM TCP 会话调用本地模型 SDK 替身，核对检索顺序、参数、Unicode、请求 UUID 与唯一完成事件；第二个客户端页面不接收业务输出，状态／事件／日志无合成正文标记。覆盖错误角色、未信任身份、错误公钥、过期信任、目标不可达、监听冲突、缺失凭据、配置锁定和旁文件恢复，以及手动取消、页面断开、业务超时、启动前取消和端口释放。全量保留原篡改／重放／三进程 CLI 回归。
+
+本机内置浏览器检查三个独立 CLI 进程的客户端、网关与 adapter 页面，业务端口为隔离随机端口，模型为回环 HTTP/SSE 合成服务。已观察配置保存、真实认证、普通／流式完成、局部输出显示“已停止 · 未完成”、复制成功、清空结果、非法端口固定提示、网关／adapter 停止后重启及数值计数重置。首次浏览器流式替身缺少 finish_reason 最终事件，被正确标记未完成；补齐测试替身后正常完成。Windows 原生浏览器控制工具无法可靠确认 URL，停止该路径；随后通过明确 URL 的内置浏览器完成验证。
+
+本地报告为 `artifacts/webui-full-junit.xml`、`artifacts/integration.json`、`artifacts/security-core.json`；截图与浏览器验证只含合成输入。未调用真实 DeepSeek，未执行 Linux 本轮回归、真实三机局域网、长负载或生产验收。回环浏览器 HTTP 与角色间国密通信边界见 [WebUI 说明](webui.md)。
+
 ## DeepSeek 真实三进程验证
 
 2026-10-14，源码 e08812a，经用户授权使用本地 `.env` 提供的 API key 调用真实 DeepSeek。在隔离配置目录生成新 SM2 身份和空闲端口，分别启动独立 adapter、gateway、client 进程。实际链路为 client→国密网关→adapter→DeepSeek API，未注入模型替身。模型为 deepseek-flash，关闭思考模式；合成提示词要求回复“连接成功”，每次上限 32 token。

@@ -33,16 +33,21 @@ class Metrics:
         self._counts[name] += 1
 
     def render(self, audit: PrivacyAudit) -> bytes:
+        values = {f"gateway_{key}": value for key, value in self.snapshot(audit).items()}
+        return "".join(f"{key} {value}\n" for key, value in values.items()).encode()
+
+    def snapshot(self, audit: PrivacyAudit | None) -> dict[str, int]:
+        """返回数值副本，供本地 UI 展示；保留回环指标监听边界。"""
         values = {f"{key}_total": self._counts[key] for key in sorted(COUNTERS)}
         values.update(
             active_sessions=self.active_sessions,
             pending_sessions=self.pending_sessions,
-            audit_queued=audit.queued,
-            audit_healthy=int(audit.healthy),
-            audit_rejected_total=audit.rejected,
-            audit_write_failures_total=audit.write_failures,
+            audit_queued=audit.queued if audit else 0,
+            audit_healthy=int(audit.healthy) if audit else 0,
+            audit_rejected_total=audit.rejected if audit else 0,
+            audit_write_failures_total=audit.write_failures if audit else 0,
         )
-        return "".join(f"gateway_{key} {value}\n" for key, value in values.items()).encode()
+        return values
 
 
 async def start_metrics_server(

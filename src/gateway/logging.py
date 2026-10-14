@@ -32,6 +32,7 @@ LOG_EVENTS = (
             "connection_rejected",
             "client_connection_received",
             "client_connection_closed",
+            "adapter_authenticated",
             "upstream_connecting",
             "upstream_authenticated",
             "request_forwarded",

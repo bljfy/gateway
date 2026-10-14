@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 from gateway.codec import MAX_RESPONSE_BODY_BYTES, decode_response, encode_request
 from gateway.config import Limits
@@ -66,11 +66,11 @@ class InferenceClient:
             raise ProtocolError("response request id does not match the request")
         return response
 
-    def stream(self, request: InferenceRequest) -> AsyncIterator[InferenceChunk]:
+    def stream(self, request: InferenceRequest) -> AsyncGenerator[InferenceChunk, None]:
         """Request streaming output and yield authenticated chunks in order."""
         return self._stream(request)
 
-    async def _stream(self, request: InferenceRequest) -> AsyncIterator[InferenceChunk]:
+    async def _stream(self, request: InferenceRequest) -> AsyncGenerator[InferenceChunk, None]:
         async with self._call_lock:
             completed = False
             deadline = asyncio.get_running_loop().time() + self._limits.request_timeout_seconds

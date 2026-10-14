@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>国密推理 · 本地控制台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/markdown-it.min.js" defer></script>
+  <script src="/static/output.js" defer></script><script src="/static/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="mark">密</span><span>国密推理<small>SECURE INFERENCE</small></span></a>
+    <div class="nav-caption">本机角色</div>
+    <div class="role-item" data-role="client"><span>01</span> 客户端</div>
+    <div class="role-item" data-role="gateway"><span>02</span> 安全网关</div>
+    <div class="role-item" data-role="adapter"><span>03</span> 推理 Adapter</div>
+    <div class="sidebar-note"><span class="dot"></span> 本机控制面<p>浏览器 HTTP · 回环访问<br>角色间 SM2 / SM4-GCM</p></div>
+  </aside>
+  <main>
+    <header><div><div class="eyebrow">国密大模型推理安全网关 / WEBUI</div><h1 id="title">本地控制台</h1><p id="subtitle">加载本地身份，连接安全推理链路。</p></div><span id="socket-status" class="badge">页面连接中</span></header>
+    <div class="boundary"><strong>通信边界</strong><span>本机浏览器 → 本地 UI 服务：HTTP</span><span>客户端 ⇄ 网关 ⇄ Adapter：国密安全会话</span><span>Adapter → 模型：HTTPS</span></div>
+    <div id="notice" role="alert" hidden></div>
+    <section class="card config-card">
+      <div class="section-heading"><div><span class="eyebrow">01 / CONNECTION</span><h2>身份与连接配置</h2></div><span id="config-status" class="badge">尚未加载</span></div>
+      <div class="path-row"><label>本地身份配置路径<input id="config_path" placeholder="本机 client.json / gateway.json / adapter.json 路径" autocomplete="off"></label><button id="load" class="secondary">加载配置</button></div>
+      <div class="form-grid">
+        <label class="server-only">业务监听 IP<input id="listen_host" placeholder="0.0.0.0"></label>
+        <label class="server-only">业务监听端口<input id="listen_port" type="number" min="1" max="65535"></label>
+        <label class="outbound-only">已信任目标身份<select id="target_id"></select></label>
+        <label class="outbound-only">目标 IP<input id="target_host" placeholder="192.168.1.10"></label>
+        <label class="outbound-only">目标端口<input id="target_port" type="number" min="1" max="65535"></label>
+        <label class="adapter-only wide">模型服务 Base URL<input id="base_url" type="url" placeholder="https://api.deepseek.com"></label>
+        <label class="adapter-only">API Key 环境变量名<input id="api_key_env" placeholder="DEEPSEEK_API_KEY"></label>
+      </div>
+      <div class="actions"><button id="save" class="secondary">保存连接设置</button><span id="dirty-note" class="muted">设置保存到独立旁文件，身份与信任文件保持原样。</span></div>
+      <p class="muted adapter-only">API Key 从本进程环境或启动目录的 .env 加载；页面不读取或展示凭据值。</p>
+    </section>
+    <section class="card">
+      <div class="section-heading"><div><span class="eyebrow">02 / RUNTIME</span><h2 id="runtime-title">运行状态</h2></div><span id="phase" class="badge">未启动</span></div>
+      <div class="actions"><button id="test" class="client-only secondary">测试网关认证</button><button id="start" class="server-only primary">启动本角色服务</button><button id="stop-service" class="server-only secondary">停止服务</button><span id="runtime-note" class="muted"></span></div>
+      <div id="metrics" class="metrics"></div>
+    </section>
+    <section class="client-only inference-grid">
+      <div class="card"><div class="section-heading"><div><span class="eyebrow">03 / REQUEST</span><h2>推理请求</h2></div><span class="badge neutral">单轮推理</span></div>
+        <label>提示词<textarea id="prompt" rows="6" placeholder="输入需要模型处理的问题…"></textarea></label>
+        <div class="context-heading"><h3>检索片段 <span class="muted">可选，按添加顺序传递</span></h3><button id="add-context" class="text-button">＋ 添加片段</button></div><div id="contexts"></div>
+        <div class="form-grid inference-options"><label>模型<input id="model" value="deepseek-flash"></label><label>输出 token 上限<input id="max_output_tokens" type="number" min="1" max="4294967295" value="512"></label></div>
+        <label class="checkbox"><input id="stream" type="checkbox" checked>流式输出</label>
+        <div class="actions"><button id="infer" class="primary">发送请求</button><button id="cancel" class="secondary" disabled>停止生成</button></div>
+      </div>
+      <div class="card result-card"><div class="section-heading"><div><span class="eyebrow">04 / RESPONSE</span><h2>推理结果</h2></div><span id="result-status" class="badge neutral">等待请求</span></div>
+        <div id="output" class="markdown-body" role="region" aria-label="模型输出"></div><div id="result-placeholder">回答将在这里显示。<br><span>业务内容仅保留在当前页面。</span></div>
+        <div class="actions"><button id="copy" class="secondary">复制结果</button><button id="clear" class="text-button">清空结果</button></div>
+      </div>
+    </section>
+    <section class="card events-card"><div class="section-heading"><div><span class="eyebrow">EVENTS</span><h2>脱敏运行事件</h2></div><span class="muted">最多保留 128 条 · 不记录业务正文</span></div><ol id="events"><li class="muted" id="no-events">暂无运行事件</li></ol></section>
+    <footer>国密推理实验控制台<span>预置信任公钥 · 双向身份认证 · 独立安全会话</span></footer>
+  </main>
+</body>
+</html>

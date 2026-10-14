@@ -31,6 +31,10 @@ uv sync --locked --no-dev
 
 ## 模型 SDK
 
+Markdown 展示随包分发 `markdown-it==15.0.2` 官方 UMD 构建，无新增 Python 依赖、Node.js 构建或运行时 CDN。来源、校验与许可见 [第三方资源](third_party.md)。独立 JavaScript 测试仅使用 Node 内置模块；Node 为开发验证工具，生产 WebUI 不要求安装。
+
+WebUI 运行依赖固定为 `aiohttp==3.14.5`，提供与现有 asyncio 运行层共用事件循环的 HTTP、WebSocket 和应用生命周期。通过 uv add 更新声明与锁文件，原有依赖版本保持不变。首版使用原生 HTML/CSS/JavaScript，无 Node.js 构建或 CDN 依赖。接口签名按实际安装的 3.14.5 源码、类型注解核查，发布与生命周期说明见 [aiohttp 官方文档](https://docs.aiohttp.org/en/v3.14.5/)。
+
 本地环境文件使用运行依赖 `python-dotenv==1.2.1`，CLI 显式读取当前工作目录 `.env`，关闭变量插值且不覆盖已有环境变量。
 
 运行依赖新增 openai==3.31.0，通过 uv add 更新声明与锁文件。DeepSeek 官方采用兼容 OpenAI 的 Chat Completions API，本项目使用异步 AsyncOpenAI，并显式设置 DeepSeek 地址与凭据、max_retries=0 和业务超时。该版本默认 HTTP 客户端为 httpx2；安装版本源码和类型检查已用于核对 API。Python 3.12 保持原版本范围。

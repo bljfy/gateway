@@ -9,6 +9,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 artifacts/
+*.webui.json
 dist/
 *.egg-info/
 .env

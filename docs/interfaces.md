@@ -57,4 +57,8 @@ SM4-GCM 后端的 `seal_sm4_gcm` 返回密文与 16 字节标签拼接，`open_s
 
 ## 变更与测试
 
+新增回环 WebUI 控制接口，详见 [本地 API](webui.md#本地-api)。`load_runtime(path, role, overrides=RuntimeOverrides(...))` 仅允许覆盖监听端点、已信任目标的地址／身份选择和 adapter 模型连接参数，不接受新公钥；不传覆盖参数时保持 CLI 行为。`run_server(..., status=RuntimeStatus())` 可注入进程内状态对象，快照仅含会话、请求和审计计数。
+
+`SecuritySessionManager.session_counts()`、`Metrics.snapshot(audit)` 和 `AdapterMetrics.snapshot()` 返回数值副本。`AdapterServer` 增加可选 `metrics` 参数；完成计数在响应发送结束后增加，取消和失败分别计数。`InferenceClient.stream` 的具体返回标注细化为可显式关闭的 `AsyncGenerator`，仍满足原 `InferenceService` 契约。契约与线协议版本不变。
+
 接口由 C 维护，安全语义由 A、配置与审计由 B 确认。修改签名或语义时同步契约版本、消费者与测试，协调流程见 [三线计划](implementation_plan.md#13-实施顺序)。测试替身仅放在 `test/`；当前契约测试验证边界、隐私表示和异步调用，不代表实际密码或网关功能已通过验收。
