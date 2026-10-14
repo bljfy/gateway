@@ -99,6 +99,7 @@ sequenceDiagram
 
 2026-10-14 已完成真实 DeepSeek 三进程普通与流式请求复测，核对响应 UUID、成功审计及停机端口释放。首次请求曾失败，根因未确认；此次验证不代表稳定性、长负载或生产验收通过，详情见 [真实三进程验证](docs/integration_report.md#deepseek-真实三进程验证)。
 
+- [题目要求与项目实现说明](docs/requirements_solution.md)：五项要求的实现机制、源码、测试证据及性能对照。
 - [实现方案](docs/implementation_plan.md)：架构、安全边界、开发职责与验收。
 - [公共接口](docs/interfaces.md)：契约 2.0、adapter 和 provider 扩展接口。
 - [配置说明](docs/configuration.md)：信任、资源限额和模型连接配置。
