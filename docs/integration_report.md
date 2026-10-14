@@ -1,5 +1,20 @@
 # 三程序整合报告
 
+## DeepSeek 真实三进程验证
+
+2026-10-14，源码 e08812a，经用户授权使用本地 `.env` 提供的 API key 调用真实 DeepSeek。在隔离配置目录生成新 SM2 身份和空闲端口，分别启动独立 adapter、gateway、client 进程。实际链路为 client→国密网关→adapter→DeepSeek API，未注入模型替身。模型为 deepseek-flash，关闭思考模式；合成提示词要求回复“连接成功”，每次上限 32 token。
+
+| 调用 | 客户端退出码 | 总耗时 | 结果 |
+| --- | --- | --- | --- |
+| 普通请求 | 0 | 5.171 秒 | 收到预期回答，响应 UUID 一致，client_completed |
+| 流式请求 | 0 | 1.469 秒 | 收到预期回答，响应 UUID 一致，完整消费最终分片 |
+
+回环指标可访问，网关成功终结审计为 2 条。通过停止文件关闭服务，adapter 与 gateway 均退出 0，三个监听端口均可重新绑定。测试使用显式 HTTP(S) 环境代理，移除测试子进程未使用的 ALL_PROXY SOCKS 回退，避免未安装可选 SOCKS 依赖导致 SDK 初始化失败；该调整未修改用户环境或生产配置。
+
+首次完整链路请求退出 1，网关记录转发成功后业务失败，服务仍正常清理；未捕获该 API 错误的具体状态，原因尚未确认。随后模型列表查询和一次直接调用成功，再以新 UUID 完整复测，普通及流式均通过。首次失败不能据此认定已解决其根因，暂不作稳定性或长负载结论。
+
+本地证据：`artifacts/deepseek-live-25bb22eefd/report.json` 保留首次失败；`artifacts/deepseek-live-42ecf850f1/report.json` 保存成功复测、耗时、UUID 校验、审计及清理结果。报告不保存 API key、真实业务输入或模型回答。下文“未调用真实模型”的描述对应此前各轮验证，不包含本节。
+
 ## Adapter 迁移补充验证
 
 2026-10-14 从基准 5fdd209 将生产推理侧迁移为 adapter/provider，契约 2.0。链路为用户客户端→国密网关→adapter→DeepSeek，前两段国密会话，最后一段 HTTPS。DeepSeekProvider 使用锁定 openai==3.31.0 的异步 SDK，默认 deepseek-flash、关闭思考模式；旧配置迁移见 [部署说明](deployment.md#从模拟服务迁移)。下文历史整合与性能记录保留其原实现和统计。
