@@ -37,6 +37,8 @@ Linux 使用 `export DEEPSEEK_API_KEY='<你的 DeepSeek API Key>'`。凭据不�
 
 ## 三程序运行
 
+Windows 可双击根目录 `start.cmd`，一次启动三角色 WebUI 以及 adapter／网关业务服务并打开页面。首次完成 bootstrap，在根目录 `.env` 填入模型凭据。详细步骤、端口选项和停止方法见 [一键启动](webui.md#一键启动)。
+
 需要浏览器操作时，使用 `guomi-gateway webui --role client|gateway|adapter`。三个角色分别拥有独立页面、配置和生命周期，操作与三机部署步骤见 [WebUI 使用说明](webui.md)。原有 CLI 命令继续可用，避免同一角色的 CLI 与 WebUI 同时占用相同业务端口。
 
 先生成新目录的配置：

@@ -43,6 +43,8 @@ Linux 启动前设置 [原生库加载路径](docs/protocol.md#原生环境)。�
 
 ## 独立程序与直接推理
 
+Windows 双击根目录 `start.cmd`，自动初始化本地身份、启动三角色 WebUI 及 adapter／网关业务服务，并打开三个浏览器页面。先完成 bootstrap，并在根目录 `.env` 配置模型凭据。在启动窗口按 Ctrl+C 统一停止本次启动的服务。端口设置与命令用法见 [一键启动](docs/webui.md#一键启动)。
+
 三个角色各有本地中文 WebUI。先初始化身份，再在各角色的终端运行：
 
 ```powershell

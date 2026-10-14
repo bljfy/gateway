@@ -25,6 +25,7 @@ from gateway.runtime import (
     run_client,
     run_server,
 )
+from gateway.webui.launcher import launch
 from gateway.webui.server import run_webui
 
 DEMO_DIRECTORY = Path(".tools/demo")
@@ -126,14 +127,43 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--role", choices=[role.value for role in PeerRole], required=True)
     ui.add_argument("--config", type=Path, help="local identity configuration")
     ui.add_argument("--port", type=_positive_int, help="loopback WebUI port")
+    ui.add_argument("--stop-file", type=Path, help="exit gracefully when this file appears")
     ui.set_defaults(func=_webui)
+    all_ui = subparsers.add_parser("webui-all", help="start all three local WebUIs and services")
+    all_ui.add_argument("--directory", type=Path, default=DEMO_DIRECTORY)
+    all_ui.add_argument("--manifest", type=Path, default=NATIVE_MANIFEST)
+    all_ui.add_argument("--client-port", type=_positive_int, default=18080)
+    all_ui.add_argument("--gateway-port", type=_positive_int, default=18081)
+    all_ui.add_argument("--adapter-port", type=_positive_int, default=18082)
+    all_ui.add_argument("--no-browser", action="store_true")
+    all_ui.add_argument("--stop-file", type=Path)
+    all_ui.set_defaults(func=_webui_all)
     return parser
 
 
 def _webui(args: argparse.Namespace) -> int:
     role = PeerRole(args.role)
-    run_webui(role, args.config or DEMO_DIRECTORY / f"{role.value}.json", args.port)
+    run_webui(
+        role,
+        args.config or DEMO_DIRECTORY / f"{role.value}.json",
+        args.port,
+        stop_file=args.stop_file,
+    )
     return 0
+
+
+def _webui_all(args: argparse.Namespace) -> int:
+    return launch(
+        args.directory,
+        args.manifest,
+        {
+            PeerRole.CLIENT: args.client_port,
+            PeerRole.GATEWAY: args.gateway_port,
+            PeerRole.ADAPTER: args.adapter_port,
+        },
+        open_browser=not args.no_browser,
+        stop_file=args.stop_file,
+    )
 
 
 def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None:
@@ -259,7 +289,7 @@ def main(argv: list[str] | None = None) -> int:
     func: Callable[[argparse.Namespace], int] = args.func
     with console_logging(quiet=args.quiet):
         try:
-            if args.command in {"adapter", "demo", "infer", "init-demo", "webui"}:
+            if args.command in {"adapter", "demo", "infer", "init-demo", "webui", "webui-all"}:
                 load_dotenv(Path(".env"), override=False, interpolate=False)
             return func(args)
         except KeyboardInterrupt:

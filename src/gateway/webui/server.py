@@ -225,10 +225,27 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
     return app
 
 
-def run_webui(role: PeerRole, config: Path, port: int | None = None) -> None:
+async def serve_until_stop(app: web.Application, port: int, stop_file: Path) -> None:
+    runner = web.AppRunner(app, access_log=None)
+    try:
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", port).start()
+        print(f"WebUI: http://127.0.0.1:{port}", flush=True)
+        while not stop_file.exists():
+            await asyncio.sleep(0.1)
+    finally:
+        await runner.cleanup()
+
+
+def run_webui(
+    role: PeerRole, config: Path, port: int | None = None, *, stop_file: Path | None = None
+) -> None:
     chosen = DEFAULT_PORTS[role] if port is None else port
     if type(chosen) is not int or not 1 <= chosen <= 65535:
         raise ValueError("invalid UI port")
+    if stop_file is not None:
+        asyncio.run(serve_until_stop(create_app(role, config), chosen, stop_file))
+        return
     web.run_app(
         create_app(role, config),
         host="127.0.0.1",

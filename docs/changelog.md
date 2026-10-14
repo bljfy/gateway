@@ -29,6 +29,8 @@
 
 ### 新增
 
+- 整合已有三角色 WebUI，增加 Windows `start.cmd`／`scripts/start.ps1` 和 `webui-all` 一键入口，自动初始化身份、依次启动 adapter 与网关业务服务并打开三个页面；启动失败和正常退出时清理本次创建的进程，单角色 WebUI 支持停止文件。
+
 - 三角色独立中文 WebUI：`webui --role client|gateway|adapter`，回环 HTTP 与同源 WebSocket，手动加载现有身份和保存非敏感端点旁文件；客户端支持检索片段、普通／流式推理、认证测试及取消，网关和 adapter 支持启停、数值指标与脱敏事件。页面断开取消对应推理，服务重启创建新的安全运行对象；角色间国密链路与现有 CLI 保持兼容。新增固定 aiohttp 依赖、本地安全与生命周期回归、局域网三机使用说明。
 
 - 增加 `.env.example` 和 CLI 的 `.env` 自动加载，已有进程环境变量优先；本地凭据文件加入 Git 忽略规则。

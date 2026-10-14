@@ -26,6 +26,8 @@ test/unit/application/test_deepseek.py 验证真实 SDK 参数映射、检索顺
 
 ## 配置与组织
 
+2026-10-14 在 Windows x86_64 / Python 3.12.11 / GmSSL 3.1.1 整合既有三角色 WebUI 与一键启动入口：完整非 e2e 回归 429 项通过、5 项 Linux bootstrap 用例因未配置 Git Bash 跳过、1 项外部模型测试排除；Ruff、format、mypy、PowerShell 语法及前端 27 个展示场景通过。新增启动测试使用三个独立 WebUI 进程和本地模型 API，验证普通／流式推理、业务端口冲突回滚和停止文件退出后的六端口释放；随后补充 KeyboardInterrupt 清理用例并单独验证。原生 `start.cmd -NoBrowser` 已验证首次生成配置、三控制台与业务服务就绪，以及子进程退出后清理。终端工具未成功传递键盘 Ctrl+C，浏览器自动打开及真实 DeepSeek 请求未在本次验证；KeyboardInterrupt 用例验证异常清理路径。JUnit 保存于本地忽略目录 `artifacts/webui-launcher-junit.xml`。
+
 统一使用 pytest，测试放在 `test/`。首次实现功能前在 `pyproject.toml` 设置 `testpaths = ["test"]`、注册 `e2e` 标记，并通过 [uv](dependencies.md) 添加开发依赖。
 
 - 文件使用 `test_*.py`，函数使用 `test_*`，公共夹具放在 `test/conftest.py`。

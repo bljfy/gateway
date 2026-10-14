@@ -4,6 +4,25 @@
 
 ## 启动与操作
 
+### 一键启动
+
+Windows 首次完成 `scripts/bootstrap.ps1`，在项目根目录 `.env` 配置模型凭据后，双击根目录 `start.cmd`。启动脚本使用本地 uv 同步锁定依赖，首次生成 `.tools/demo` 身份配置，依次启动 adapter、网关和客户端的独立 WebUI 进程，自动启动 adapter／网关业务服务，等待就绪后打开三个页面。
+
+```powershell
+# 一键启动
+.\start.cmd
+# 修改三个 WebUI 端口
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1 -ClientPort 18090 -GatewayPort 18091 -AdapterPort 18092
+# 只启动，稍后手动打开页面
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1 -NoBrowser
+```
+
+在客户端页面直接发送问题即可。保持启动窗口打开，按 Ctrl+C 依次关闭客户端、网关和 adapter；关闭浏览器页面不停止后台服务。启动失败会清理本次创建的进程，UI 或业务端口已被其他程序占用时拒绝启动。已有配置和 WebUI 旁文件会复用；配置不完整时修复后重新运行。
+
+也可直接运行 `.\.venv\Scripts\guomi-gateway.exe webui-all`。支持 `--directory`、`--manifest`、`--client-port`、`--gateway-port`、`--adapter-port` 和 `--no-browser`；其中端口参数只改变 WebUI 端口，业务端口仍来自身份配置或旁文件。`webui-all --stop-file <路径>` 可通过创建停止文件正常退出，单角色 `webui` 也支持该选项；再次启动前移除已有停止文件。
+
+### 分别启动
+
 完成 bootstrap 并准备现有 SM2 身份配置；首次本地演示可执行 `guomi-gateway init-demo`。在三个终端分别运行：
 
 ```powershell
