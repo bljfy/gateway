@@ -6,13 +6,22 @@
 
 按 [开发指南](developer_guide.md) 准备环境，在仓库根目录执行 `uv sync --locked`。Windows 入口为 `.\.venv\Scripts\guomi-gateway.exe`，Linux 为 `.venv/bin/guomi-gateway`，也可使用 `uv run --locked guomi-gateway`。Linux 先设置 [原生库加载路径](protocol.md#原生环境)。
 
-在运行 adapter、demo 或 infer 的终端设置模型凭据：
+在项目根目录复制 `.env.example` 为 `.env`，填入密钥：
+
+```dotenv
+DEEPSEEK_API_KEY=你的DeepSeek_API_Key
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
+
+adapter、demo、infer 和 init-demo 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。已有 adapter JSON 仍使用自身 base_url，地址变更需更新配置。
+
+也可以在运行 adapter、demo 或 infer 的终端设置模型凭据：
 
 ```powershell
 $env:DEEPSEEK_API_KEY = '<你的 DeepSeek API Key>'
 ```
 
-Linux 使用 `export DEEPSEEK_API_KEY='<你的 DeepSeek API Key>'`。凭据不写入 JSON、Git 或命令参数；密钥缺失时调用失败。gateway、client 和 init-demo 不读取模型密钥。
+Linux 使用 `export DEEPSEEK_API_KEY='<你的 DeepSeek API Key>'`。凭据不写入 JSON、Git 或命令参数；密钥缺失时调用失败。gateway、client 不加载模型凭据；init-demo 不要求模型密钥。
 
 ## 一条命令演示
 

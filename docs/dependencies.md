@@ -31,6 +31,8 @@ uv sync --locked --no-dev
 
 ## 模型 SDK
 
+本地环境文件使用运行依赖 `python-dotenv==1.2.1`，CLI 显式读取当前工作目录 `.env`，关闭变量插值且不覆盖已有环境变量。
+
 运行依赖新增 openai==3.31.0，通过 uv add 更新声明与锁文件。DeepSeek 官方采用兼容 OpenAI 的 Chat Completions API，本项目使用异步 AsyncOpenAI，并显式设置 DeepSeek 地址与凭据、max_retries=0 和业务超时。该版本默认 HTTP 客户端为 httpx2；安装版本源码和类型检查已用于核对 API。Python 3.12 保持原版本范围。
 
 参考 [SDK 3.31.0](https://pypi.org/project/openai/3.31.0/)和[DeepSeek 接口](https://api-docs.deepseek.com/zh-cn/api/create-chat-completion/)。SDK 和其传递依赖均通过 uv.lock 锁定，部署不使用临时 pip 安装。

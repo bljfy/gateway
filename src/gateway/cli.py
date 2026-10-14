@@ -11,6 +11,8 @@ from contextlib import aclosing
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from dotenv import load_dotenv
+
 from gateway.adapter import DEFAULT_MODEL, AdapterConfig, create_provider
 from gateway.config import Limits
 from gateway.contracts import GatewayError, InferenceRequest, PeerRole
@@ -245,6 +247,8 @@ def main(argv: list[str] | None = None) -> int:
     func: Callable[[argparse.Namespace], int] = args.func
     with console_logging(quiet=args.quiet):
         try:
+            if args.command in {"adapter", "demo", "infer", "init-demo"}:
+                load_dotenv(Path(".env"), override=False, interpolate=False)
             return func(args)
         except KeyboardInterrupt:
             return 130
