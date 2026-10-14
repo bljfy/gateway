@@ -1,4 +1,4 @@
-"""Canonical bounded wire codec for security contract 1.0."""
+"""Canonical bounded wire codec for security contract 2.0."""
 
 import asyncio
 import struct

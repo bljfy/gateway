@@ -58,8 +58,8 @@ class GatewayConfig:
 
     def __post_init__(self) -> None:
         validate_level(self.log_level)
-        if self.upstream.role is not PeerRole.SIMULATOR:
-            raise ValueError("upstream must have simulator role")
+        if self.upstream.role is not PeerRole.ADAPTER:
+            raise ValueError("upstream must have adapter role")
         if self.suite != "SM2-SM4-GCM-SM3-v1" or type(self.tag_bytes) is not int:
             raise ValueError("unsupported cipher suite or tag")
         if self.tag_bytes != 16:
@@ -107,7 +107,7 @@ def load_config(path: Path) -> GatewayConfig:
         # Validate each primitive before constructing dataclasses from external input.
         ints = {key: positive(value, key) for key, value in limits.items()}
         times = {key: positive(value, key) for key, value in session.items()}
-        defaults = GatewayConfig(PeerIdentity(peer_id, PeerRole.SIMULATOR, version))
+        defaults = GatewayConfig(PeerIdentity(peer_id, PeerRole.ADAPTER, version))
         for key, value in options.items():
             if type(value) is not type(getattr(defaults, key)):
                 raise ValueError("invalid gateway option type")

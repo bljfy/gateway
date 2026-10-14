@@ -26,11 +26,11 @@ from gateway.contracts import InferenceRequest, InferenceResponse, PeerIdentity,
 from gateway.crypto import GmSSLBackend
 from gateway.server.relay import GatewayServer
 from gateway.session import LocalIdentity, SecuritySession, SecuritySessionManager, TrustRecord
-from gateway.simulator import InferenceSimulator
 from test.benchmark.transport import TransportManager, certificates
+from test.fixtures.mock_provider import MockProvider
 
 
-class Echo(InferenceSimulator):
+class Echo(MockProvider):
     @staticmethod
     def _output(request):
         return request.prompt
@@ -74,8 +74,8 @@ class MeasuredNative(SecuritySessionManager):
 
 def manager(mode, role, identities, directory, port, manifest):
     local, _ = identities[role]
-    incoming = {"gateway": "client", "simulator": "gateway"}.get(role)
-    outgoing = {"client": "gateway", "gateway": "simulator"}.get(role)
+    incoming = {"gateway": "client", "adapter": "gateway"}.get(role)
+    outgoing = {"client": "gateway", "gateway": "adapter"}.get(role)
     if mode != "gm":
         return TransportManager(
             local.peer,
@@ -103,8 +103,8 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
     owned = set()
     errors = Counter()
     audit = PrivacyAudit(capacity=8192) if audit_on else DisabledAudit()
-    gateway = GatewayServer(mgr, GatewayConfig(identities["simulator"][0].peer), audit)
-    simulator = Echo()
+    gateway = GatewayServer(mgr, GatewayConfig(identities["adapter"][0].peer), audit)
+    adapter = Echo()
     audit_path = directory / f"{mode}-{audit_on}-{role}-audit.jsonl"
     log = audit_path.open("w", encoding="utf-8")
 
@@ -117,7 +117,7 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
             else:
                 session = await mgr.accept(reader, writer)
                 try:
-                    await simulator.serve(session)
+                    await adapter.serve(session)
                 finally:
                     await session.close()
         except Exception as exc:
@@ -366,7 +366,7 @@ async def run(args, output):
                     services = []
                     mgr = None
                     try:
-                        sim = start(mode, "simulator", identities, directory, 0, manifest, audit_on)
+                        sim = start(mode, "adapter", identities, directory, 0, manifest, audit_on)
                         services.append(sim)
                         gw = start(
                             mode, "gateway", identities, directory, sim[3], manifest, audit_on
@@ -377,7 +377,7 @@ async def run(args, output):
                         handshake_rows = []
                         for hop, role, port, target in (
                             ("A", "client", gw[3], "gateway"),
-                            ("B", "gateway", sim[3], "simulator"),
+                            ("B", "gateway", sim[3], "adapter"),
                         ):
                             hm = manager(mode, role, identities, directory, port, manifest)
                             try:
@@ -584,7 +584,7 @@ def main():
             "cpu": platform.processor(),
             "logical_cpus": os.cpu_count(),
             "rss_sample_seconds": 0.1,
-            "roles": ["client", "gateway", "simulator"],
+            "roles": ["client", "gateway", "adapter"],
             "network": "IPv4 loopback TCP",
             "gmssl": json.loads(args.manifest.read_text()),
             "source_sha": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),

@@ -45,9 +45,7 @@ async def test_tls_mutual_identity_and_ready(tmp_path, fault, monkeypatch):
         ctx.load_verify_locations(tmp_path / "gateway.pem")
         initiator.client_context = ctx
     elif fault == "wrong_certificate":
-        initiator.client_context.load_cert_chain(
-            tmp_path / "simulator.pem", tmp_path / "simulator.key"
-        )
+        initiator.client_context.load_cert_chain(tmp_path / "adapter.pem", tmp_path / "adapter.key")
     try:
         if fault == "none":
             session = await initiator.open(gateway)
@@ -60,9 +58,7 @@ async def test_tls_mutual_identity_and_ready(tmp_path, fault, monkeypatch):
             ) as error:
                 # The mismatched name is rejected before any business is admitted.
                 await initiator.open(
-                    PeerIdentity("simulator", PeerRole.SIMULATOR)
-                    if fault == "wrong_name"
-                    else gateway
+                    PeerIdentity("adapter", PeerRole.ADAPTER) if fault == "wrong_name" else gateway
                 )
             assert type(error.value).__name__ in {
                 "SSLCertVerificationError",

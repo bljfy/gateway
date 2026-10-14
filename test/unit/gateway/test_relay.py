@@ -29,7 +29,7 @@ from gateway.contracts import (
 )
 from gateway.server import ForwardingService, GatewayServer
 
-UPSTREAM = PeerIdentity("configured-simulator", PeerRole.SIMULATOR)
+UPSTREAM = PeerIdentity("configured-adapter", PeerRole.ADAPTER)
 
 
 def record(request_id, payload=b"synthetic", *, kind=RecordType.REQUEST, index=0, final=True):
@@ -557,7 +557,7 @@ async def test_failed_terminal_audit_blocks_further_admission():
 
 @pytest.mark.asyncio
 async def test_wrong_upstream_identity_is_closed_without_sending():
-    upstream = Session(PeerIdentity("unconfigured", PeerRole.SIMULATOR))
+    upstream = Session(PeerIdentity("unconfigured", PeerRole.ADAPTER))
     inbound, _, _, _, _, task = setup(upstream=upstream)
     inbound.incoming.put_nowait(record(uuid4()))
     await asyncio.wait_for(task, 2)
@@ -656,7 +656,7 @@ async def test_dto_forwarding_implements_contract_and_preserves_id():
 async def test_dto_forwarding_rejects_failures_and_closes(mode):
     upstream = Session(UPSTREAM)
     if mode == "identity":
-        upstream.peer = PeerIdentity("wrong", PeerRole.SIMULATOR)
+        upstream.peer = PeerIdentity("wrong", PeerRole.ADAPTER)
     manager = Manager(None, upstream)
     audit = PrivacyAudit(1)
     if mode == "audit":

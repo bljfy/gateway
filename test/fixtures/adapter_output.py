@@ -1,4 +1,4 @@
-"""Validate simulator metadata while comparing its reproducible business body."""
+"""Validate adapter metadata while comparing its reproducible business body."""
 
 import json
 from datetime import UTC, datetime

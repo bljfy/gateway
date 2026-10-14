@@ -274,7 +274,7 @@ async def test_trust_failures(backend: GmSSLBackend, change: str) -> None:
         elif change == "version":
             trust = replace(trust, peer=replace(trust.peer, key_version=2))
         elif change == "role":
-            trust = replace(trust, peer=replace(trust.peer, role=PeerRole.SIMULATOR))
+            trust = replace(trust, peer=replace(trust.peer, role=PeerRole.ADAPTER))
         else:
             trust = replace(trust, signing_public_key=backend.generate_keypair()[1])
         pair.client.trust["gateway"] = trust
@@ -491,7 +491,7 @@ async def test_relay_consumes_real_heartbeat_and_authenticated_close(backend: Gm
         client, server = await pair.connect()
         audit = PrivacyAudit(security_capacity=1)
         relay = GatewayServer(
-            pair.server, GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR)), audit
+            pair.server, GatewayConfig(PeerIdentity("adapter", PeerRole.ADAPTER)), audit
         )
         serving = asyncio.create_task(relay._serve(server))
         await client.send(RecordType.HEARTBEAT, b"", request_id=ZERO_REQUEST)
@@ -509,7 +509,7 @@ async def test_relay_cancellation_preserves_real_secure_send(
         client, server = await pair.connect()
         relay = GatewayServer(
             pair.server,
-            GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR)),
+            GatewayConfig(PeerIdentity("adapter", PeerRole.ADAPTER)),
             PrivacyAudit(),
         )
         identifier = uuid4()

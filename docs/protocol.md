@@ -1,6 +1,8 @@
 # 安全协议与 A 线交付
 
-公共契约版本 1.0。实现入口为 `gateway.crypto.GmSSLBackend` 和 `gateway.session.SecuritySessionManager`。已实现真实 SM2 双向认证、72 字节密钥材料传送、双向密钥确认、SM4-GCM 记录、严格方向序列、时间与使用预算、轮换、认证关闭和异常清理。该协议是专用原型协议，不具备 TLS/TLCP 互操作能力，也不提供前向保密。
+公共契约版本 2.0。实现入口为 `gateway.crypto.GmSSLBackend` 和 `gateway.session.SecuritySessionManager`。已实现真实 SM2 双向认证、72 字节密钥材料传送、双向密钥确认、SM4-GCM 记录、严格方向序列、时间与使用预算、轮换、认证关闭和异常清理。该协议是专用原型协议，不具备 TLS/TLCP 互操作能力，也不提供前向保密。
+
+契约 2.0 将推理侧身份角色改为 adapter，只授权 client→gateway→adapter。身份角色字符串参与握手编码及认证摘要；旧 simulator 对端不再受支持，三端配置需要同步迁移。记录头部版本和套件保持原编码。adapter 至真实模型的 HTTPS 链路由 provider SDK 提供，国密记录保护范围止于 adapter。
 
 ## 原生环境
 
@@ -59,7 +61,7 @@ SM2 私钥接口使用 32 字节大端标量，公钥使用 65 字节未压缩�
 
 所有整数均为无符号网络序。每帧前置 `uint32` 内容长度，内容范围 1–131072 字节；接收方在读取内容前检查长度。字段编码函数 `F(a,b,...)` 对每个字段添加 `uint16` 长度，按位置连接；解析要求字段数量精确、没有尾随字节。
 
-身份为 `F(UTF8(peer_id), ASCII(role), uint32(key_version))`。身份长度 1–64 字节，角色为 `client`、`gateway`、`simulator`，密钥版本 1–2³²−1。握手消息类型是单字节前缀：
+身份为 `F(UTF8(peer_id), ASCII(role), uint32(key_version))`。身份长度 1–64 字节，角色为 `client`、`gateway`、`adapter`，密钥版本 1–2³²−1。握手消息类型是单字节前缀：
 
 | 类型 | 内容 |
 | --- | --- |
@@ -93,7 +95,7 @@ ServerHello 签名输入为 `F(server-hello, SM3(ClientHello), body)`；ClientKe
 
 ## 会话工厂与生命周期
 
-B、C 通过可信配置创建 `LocalIdentity` 与 `TrustRecord`，再注入 `SecuritySessionManager(backend, local, trust, policy)`。trust 以 peer ID 索引，记录包含两个固定公钥、精确角色与版本、启用状态、墙上时钟有效区间和可选出站地址。仅允许 client→gateway 和 gateway→simulator；其他角色组合拒绝。`open(peer)` 只能解析 trust 中固定地址，不接受业务传入目标。`accept(reader, writer)` 负责认证和失败后的传输关闭。
+B、C 通过可信配置创建 `LocalIdentity` 与 `TrustRecord`，再注入 `SecuritySessionManager(backend, local, trust, policy)`。trust 以 peer ID 索引，记录包含两个固定公钥、精确角色与版本、启用状态、墙上时钟有效区间和可选出站地址。仅允许 client→gateway 和 gateway→adapter；其他角色组合拒绝。`open(peer)` 只能解析 trust 中固定地址，不接受业务传入目标。`accept(reader, writer)` 负责认证和失败后的传输关闭。
 
 manager 限制活跃及待建立总量、待建立量和密码执行并发。密码上下文不跨任务共享；原生操作在线程执行，即使任务被重复取消也等待当前原生操作结束才释放执行槽。manager 关闭会取消并等待正在建连和握手的任务，停止新密码操作，并等待已启动的原生操作结束。默认活跃上限 1000、待建立上限 100、密码并发 4、每会话在途请求 16、每方向明文字节预算 1 GiB。具体参数由 B 配置入口校验并传入。
 

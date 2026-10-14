@@ -1,10 +1,10 @@
 # 性能与 TLS 1.3 对照
 
-基准入口为 `python -m test.benchmark.run`，代码只位于 `test/benchmark/`。生产入口继续使用真实国密安全会话。实测汇总见 [性能结果](performance_results.md)，原始数据写入忽略目录 `artifacts/`。
+基准入口为 `python -m test.benchmark.run`，代码只位于 `test/benchmark/`。生产入口使用真实国密安全会话和 DeepSeek provider；本地性能工具注入测试 provider，不访问外部模型。实测汇总见 [性能结果](performance_results.md)，原始数据写入忽略目录 `artifacts/`。
 
 ## 拓扑与身份
 
-客户端、网关、模拟服务分别位于三个独立进程，通过 IPv4 回环 TCP 连接。三个方案复用 `InferenceClient`、`GatewayServer`、业务编解码、分片与 `InferenceSimulator.serve`；模拟器覆盖输出方法，立即返回原提示词。提示词与输出分别为精确 1024 或 16384 个 ASCII 字节。普通响应另外包含业务编码，流式输出使用现有的 256 字符分片。
+客户端、网关、adapter 分别位于三个独立进程，通过 IPv4 回环 TCP 连接。三个方案复用 `InferenceClient`、`GatewayServer`、业务编解码、分片与 `AdapterServer.serve`。测试目录中的 Echo provider 立即回显原提示词，不调用 DeepSeek。提示词与输出分别为精确 1024 或 16384 个 ASCII 字节。普通响应另外包含业务编码，流式输出使用现有的 256 字符分片。
 
 每个客户端连接只有一个在途业务；同一档使用指定数量的独立客户端连接。网关每次请求重新建立并关闭上游会话，所有方案保持一致。主结果包含上游重新握手成本，不能当作连接池或单纯密码算法速度。
 
@@ -34,14 +34,14 @@ uv run --locked python -m test.benchmark.run --manifest .tools/gmssl/manifest.js
 uv run --locked python -m test.benchmark.run --manifest .tools/gmssl/manifest.json --rounds 1 --handshakes 2 --requests 4 --seconds 0.2 --concurrency 1 10 --output artifacts/performance-smoke.json
 ```
 
-可使用 `--modes gm tls` 选择正式对照，`--rounds 1` 执行满足最小握手要求的一轮。预算不足的数据不能视为完整性能验收。模拟器使用回显，当前没有延迟模型模式；实际模型计算、跨主机网络和生产限额需在目标环境另外验证。
+可使用 `--modes gm tls` 选择正式对照，`--rounds 1` 执行满足最小握手要求的一轮。预算不足的数据不能视为完整性能验收。adapter 使用回显，当前没有延迟模型模式；实际模型计算、跨主机网络和生产限额需在目标环境另外验证。
 
 ## 统计与证据
 
-- 握手测量同一连接的 TCP 建连、TCP 完成至安全 READY、总初始化三个区间。独立记录 A/B 两段，各次失败保存异常类别和总耗时；独立握手测量均由负载进程发起，B 段使用网关身份连接真实模拟器进程，不是网关进程的 CPU 分段剖析。实际网关出站建连计时另外保存在停机证据中。安全 READY 区间包含调度、证书/固定公钥校验及应用确认，不能称为纯密码运算时间。
+- 握手测量同一连接的 TCP 建连、TCP 完成至安全 READY、总初始化三个区间。独立记录 A/B 两段，各次失败保存异常类别和总耗时；独立握手测量均由负载进程发起，B 段使用网关身份连接真实 adapter 进程，不是网关进程的 CPU 分段剖析。实际网关出站建连计时另外保存在停机证据中。安全 READY 区间包含调度、证书/固定公钥校验及应用确认，不能称为纯密码运算时间。
 - 首次业务初始化从入站连接开始到第一次完整业务响应，包含两段握手和第一条业务；所有档位均使用普通请求完成该预热，包括后续测量流式的档位。正式往返/首块统计在入站预热后开始。首块、普通往返与流完成时延分别保存原始样本。P50/P95/P99 使用最近秩，平均值按样本数计算。
 - 单向有效吞吐为成功数 × 提示词字节 / 实际总墙钟；双向有效吞吐为其两倍。包含慢请求、失败与调度消耗的墙钟，不平均逐条吞吐。编码长度单独保存；TLS 记录及 TCP/IP 线字节未抓包统计，不能由应用头推算真实线速。
-- CPU 使用三个进程 user+system 时间增量 / 同一测量墙钟，100% 为一个逻辑核心；整机归一化比例再除逻辑核数。角色顺序始终为客户端、网关、模拟器。
+- CPU 使用三个进程 user+system 时间增量 / 同一测量墙钟，100% 为一个逻辑核心；整机归一化比例再除逻辑核数。角色顺序始终为客户端、网关、adapter。
 - 每 100 ms 从父进程依次读取三个进程 RSS，记录单角色峰值和每次采样 RSS 总和的最大值。读取存在短时偏移且可能遗漏瞬时峰值；总峰值不是不同时间单角色峰值的相加。客户端进程包含负载生成、统计与采样，累计原始数据也占用内存；结果包含测量工具开销。
 - 隐私审计复用字段白名单队列，开启时每 10 ms 同步排空到临时本地文件并 flush，关闭时测量替身仅接纳事件。两方案设置相同；此频率/批量有别于 CLI 默认的 50 ms/128 条，结果不能直接作为生产默认审计开销。停机时检查健康、队列拒绝、审计开始与成功结束条数及合成明文泄漏标记。
 - 原始 JSON 保存命令、Python/OpenSSL、CPU/逻辑核、系统、锁文件 SHA256、原生清单、来源基准 SHA、逐次时延、资源采样、失败类别、审计和停机结果。临时身份与私钥在运行后删除，不进入报告。
@@ -71,3 +71,9 @@ uv run --locked python -m test.benchmark.report artifacts/performance.json --mar
 国密固定公钥传送与 TLS 双向证书的信任模型、握手往返和实现路径不同。TLS 由 OpenSSL/asyncio 处理，国密通过 ctypes 与异步工作线程调用 GmSSL；差异不能全部归因于 SM4 与 AES。国密首版没有前向保密，TLS 此基线使用临时 P-256 密钥协商；会话内记录序列不等于跨连接业务去重。
 
 本机测量用于发现当前实现瓶颈，不能外推到真实模型、WAN、多进程生产服务或不同 CPU。正式发布还需 Linux 最终版本验证、多轮稳定性、目标环境压力与生产审批，见 [部署验收](deployment.md#生产验收记录)。
+
+## Adapter 迁移工具冒烟
+
+2026-10-14 在 Windows / Python 3.12.11 / GmSSL 3.1.1 使用本地 Echo provider 验证角色迁移后的性能工具。执行 gm/tls、1024 字节、1 并发、审计开启、普通与流式四档，rounds=1、handshakes=2、requests=4、seconds=0.2。累计 109 次业务成功、0 失败；短预算 acceptance_problems 为空，停机及审计检查通过。报告为本地 artifacts/adapter-performance-smoke.json。
+
+该运行只验证工具接线，不满足正式性能矩阵的预算与覆盖条件，不改写历史性能结果，也不包含 DeepSeek 计算或公网延迟。

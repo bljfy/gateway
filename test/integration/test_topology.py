@@ -25,8 +25,8 @@ from gateway.contracts import (
 from gateway.crypto import GmSSLBackend
 from gateway.runtime import Runtime, load_runtime, prepare_demo, run_server
 from gateway.session import SecuritySession
-from gateway.simulator import InferenceSimulator
-from test.fixtures.simulator_output import response_body
+from test.fixtures.adapter_output import response_body
+from test.fixtures.mock_provider import MockProvider
 
 
 def ports() -> tuple[int, int, int]:
@@ -44,7 +44,7 @@ def ports() -> tuple[int, int, int]:
 class Topology:
     client: Runtime
     gateway: Runtime
-    simulator: Runtime
+    adapter: Runtime
     directory: Path
     outbound: list[SecuritySession]
     key_fingerprints: list[tuple[bytes, str]]
@@ -68,13 +68,13 @@ async def topology(
     )
     directory = tmp_path / "demo"
     gp, sp, mp = ports()
-    prepare_demo(directory, manifest, gateway_port=gp, simulator_port=sp, metrics_port=mp)
+    prepare_demo(directory, manifest, gateway_port=gp, adapter_port=sp, metrics_port=mp)
     if getattr(request, "param", None) == "small_records":
         with (directory / "gateway.toml").open("a", encoding="utf-8") as handle:
             handle.write("max_record_plaintext_bytes=8\n")
     client = load_runtime(directory / "client.json", PeerRole.CLIENT)
     gateway = load_runtime(directory / "gateway.json", PeerRole.GATEWAY)
-    simulator = load_runtime(directory / "simulator.json", PeerRole.SIMULATOR)
+    adapter = load_runtime(directory / "adapter.json", PeerRole.ADAPTER)
     outbound: list[SecuritySession] = []
     fingerprints: list[tuple[bytes, str]] = []
     original_open = gateway.manager.open
@@ -88,12 +88,19 @@ async def topology(
     monkeypatch.setattr(gateway.manager, "open", opened)
     stops, ready = [asyncio.Event(), asyncio.Event()], [asyncio.Event(), asyncio.Event()]
     servers = [
-        asyncio.create_task(run_server(runtime, stop=stop, ready=signal.set))
-        for runtime, stop, signal in zip((simulator, gateway), stops, ready, strict=True)
+        asyncio.create_task(
+            run_server(
+                runtime,
+                stop=stop,
+                ready=signal.set,
+                provider=MockProvider() if runtime is adapter else None,
+            )
+        )
+        for runtime, stop, signal in zip((adapter, gateway), stops, ready, strict=True)
     ]
     try:
         await asyncio.wait_for(asyncio.gather(*(signal.wait() for signal in ready)), 3)
-        yield Topology(client, gateway, simulator, directory, outbound, fingerprints)
+        yield Topology(client, gateway, adapter, directory, outbound, fingerprints)
     finally:
         await client.manager.close()
         for stop in stops:
@@ -102,9 +109,9 @@ async def topology(
         assert (
             not client.manager._sessions
             and not gateway.manager._sessions
-            and not simulator.manager._sessions
+            and not adapter.manager._sessions
         )
-        assert not gateway.manager._native_tasks and not simulator.manager._native_tasks
+        assert not gateway.manager._native_tasks and not adapter.manager._native_tasks
 
 
 @pytest.mark.asyncio
@@ -131,7 +138,7 @@ async def test_real_roundtrip_and_privacy(
         ("synthetic-retrieval-marker",),
         max_output_tokens=size + 128,
     )
-    expected = (await InferenceSimulator().complete(request)).output
+    expected = (await MockProvider().complete(request)).output
     if stream:
         chunks = [chunk async for chunk in client.stream(request)]
         assert chunks[-1].is_final and sum(item.is_final for item in chunks) == 1
@@ -161,14 +168,14 @@ async def test_ciphertext_tampering_never_calls_inference(
 ) -> None:
     session = await topology.connect()
     calls = 0
-    original_output = InferenceSimulator._output
+    original_output = MockProvider._output
 
     def counted(request: InferenceRequest) -> str:
         nonlocal calls
         calls += 1
         return original_output(request)
 
-    monkeypatch.setattr(InferenceSimulator, "_output", staticmethod(counted))
+    monkeypatch.setattr(MockProvider, "_output", staticmethod(counted))
     original = core.write_frame
     mutated = False
 
@@ -198,14 +205,14 @@ async def test_replay_never_executes_twice(
 ) -> None:
     session = await topology.connect()
     calls = 0
-    original_output = InferenceSimulator._output
+    original_output = MockProvider._output
 
     def counted(request: InferenceRequest) -> str:
         nonlocal calls
         calls += 1
         return original_output(request)
 
-    monkeypatch.setattr(InferenceSimulator, "_output", staticmethod(counted))
+    monkeypatch.setattr(MockProvider, "_output", staticmethod(counted))
     original = core.write_frame
     repeated = False
 
@@ -234,7 +241,7 @@ async def test_replay_never_executes_twice(
 @pytest.mark.parametrize("failure", ["wrong_key", "expired"])
 async def test_trust_failure_blocks_business(topology: Topology, hop: str, failure: str) -> None:
     manager = topology.client.manager if hop == "client" else topology.gateway.manager
-    target = "gateway" if hop == "client" else "simulator"
+    target = "gateway" if hop == "client" else "adapter"
     trusted = manager.trust[target]
     if failure == "wrong_key":
         _, wrong = manager.backend.generate_keypair()
@@ -293,13 +300,13 @@ async def test_concurrent_client_calls_use_one_reader(topology: Topology) -> Non
 
 
 @pytest.mark.asyncio
-async def test_request_timeout_releases_simulator_work(
+async def test_request_timeout_releases_adapter_work(
     topology: Topology, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Runtime gateway config remains immutable; client request deadline covers the full link.
     entered, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def slow(self: InferenceSimulator, request: InferenceRequest) -> InferenceResponse:
+    async def slow(self: MockProvider, request: InferenceRequest) -> InferenceResponse:
         entered.set()
         try:
             await asyncio.sleep(5)
@@ -308,7 +315,7 @@ async def test_request_timeout_releases_simulator_work(
             cancelled.set()
             raise
 
-    monkeypatch.setattr(InferenceSimulator, "complete", slow)
+    monkeypatch.setattr(MockProvider, "complete", slow)
     session = await topology.connect()
     client = InferenceClient(
         session, replace(topology.gateway.gateway.limits, request_timeout_seconds=1)
@@ -327,7 +334,7 @@ async def test_configured_small_records_preserve_unicode(topology: Topology, str
     session = await topology.connect()
     client = InferenceClient(session, topology.gateway.gateway.limits)
     request = InferenceRequest(uuid4(), "m", "中文🙂" * 20, max_output_tokens=200)
-    expected = (await InferenceSimulator().complete(request)).output
+    expected = (await MockProvider().complete(request)).output
     if stream:
         assert response_body(
             "".join([chunk.output async for chunk in client.stream(request)]), request.request_id

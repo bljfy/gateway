@@ -1,7 +1,7 @@
 """In-memory :class:`SecureSession` double for exercising the business layers.
 
 Test doubles live only under ``test/`` and never authenticate a peer; they exist
-to verify the client/simulator/framing contracts while the security-core line is
+to verify the client/adapter/framing contracts while the security-core line is
 developed in parallel.
 """
 

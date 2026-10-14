@@ -1,4 +1,4 @@
-"""Independent client, gateway and simulator commands using real secure sessions."""
+"""Independent client, gateway and adapter commands using real secure sessions."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ import asyncio
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import aclosing
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from gateway.adapter import DEFAULT_MODEL, AdapterConfig, create_provider
+from gateway.config import Limits
 from gateway.contracts import GatewayError, InferenceRequest, PeerRole
 from gateway.logging import console_logging, set_log_level
 from gateway.runtime import (
@@ -20,10 +23,14 @@ from gateway.runtime import (
     run_client,
     run_server,
 )
-from gateway.simulator import InferenceSimulator
 
 DEMO_DIRECTORY = Path(".tools/demo")
 NATIVE_MANIFEST = Path(".tools/gmssl/manifest.json")
+
+
+def _write_stdout(text: str) -> None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
 
 
 def _positive_int(value: str) -> int:
@@ -36,7 +43,7 @@ def _positive_int(value: str) -> int:
     return result
 
 
-def _simulate(args: argparse.Namespace) -> int:
+def _infer(args: argparse.Namespace) -> int:
     request = InferenceRequest(
         request_id=args.request_id if args.request_id else uuid4(),
         model=args.model,
@@ -44,16 +51,20 @@ def _simulate(args: argparse.Namespace) -> int:
         retrieval_context=tuple(args.context) if args.context else (),
         max_output_tokens=args.max_output_tokens,
     )
-    simulator = InferenceSimulator()
 
     async def run() -> None:
-        if args.stream:
-            async for chunk in simulator.stream(request):
-                sys.stdout.write(chunk.output)
-            sys.stdout.write("\n")
-        else:
-            response = await simulator.complete(request)
-            sys.stdout.write(response.output + "\n")
+        provider = create_provider(AdapterConfig.from_environment(), Limits())
+        try:
+            if args.stream:
+                async with aclosing(provider.stream(request)) as iterator:
+                    async for chunk in iterator:
+                        _write_stdout(chunk.output)
+                _write_stdout("\n")
+            else:
+                response = await provider.complete(request)
+                _write_stdout(response.output + "\n")
+        finally:
+            await provider.close()
 
     asyncio.run(run())
     return 0
@@ -67,33 +78,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quiet", action="store_true", help="hide console progress logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    simulate = subparsers.add_parser("simulate", help="run the deterministic mock inference")
-    simulate.add_argument("--prompt", required=True, help="prompt text for the mock model")
-    simulate.add_argument("--model", default="mock-model", help="model identifier")
-    simulate.add_argument(
+    infer = subparsers.add_parser("infer", help="call the model provider directly")
+    infer.add_argument("--prompt", required=True, help="prompt text")
+    infer.add_argument("--model", default=DEFAULT_MODEL, help="model identifier")
+    infer.add_argument(
         "--context",
         action="append",
         default=None,
         metavar="TEXT",
         help="retrieval context item; may be repeated",
     )
-    simulate.add_argument(
+    infer.add_argument(
         "--request-id", default=None, type=UUID, help="request UUID; generated when absent"
     )
-    simulate.add_argument(
-        "--max-output-tokens", type=_positive_int, default=512, help="output budget"
-    )
-    simulate.add_argument("--stream", action="store_true", help="emit streaming chunks")
-    simulate.set_defaults(func=_simulate)
+    infer.add_argument("--max-output-tokens", type=_positive_int, default=512, help="output budget")
+    infer.add_argument("--stream", action="store_true", help="emit streaming chunks")
+    infer.set_defaults(func=_infer)
 
     demo = subparsers.add_parser("init-demo", help="create fresh local demo identities and configs")
     demo.add_argument("--directory", default=DEMO_DIRECTORY, type=Path)
     demo.add_argument("--manifest", default=NATIVE_MANIFEST, type=Path)
     demo.add_argument("--gateway-port", type=_positive_int, default=18443)
-    demo.add_argument("--simulator-port", type=_positive_int, default=19443)
+    demo.add_argument("--adapter-port", type=_positive_int, default=19443)
     demo.add_argument("--metrics-port", type=_positive_int, default=19100)
     demo.set_defaults(func=_init_demo)
-    for command in ("gateway", "simulator"):
+    for command in ("gateway", "adapter"):
         server = subparsers.add_parser(command, help=f"run the secure {command} listener")
         server.add_argument("--config", default=DEMO_DIRECTORY / f"{command}.json", type=Path)
         server.add_argument("--stop-file", type=Path)
@@ -106,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     quick.add_argument("--directory", default=DEMO_DIRECTORY, type=Path)
     quick.add_argument("--manifest", default=NATIVE_MANIFEST, type=Path)
     quick.add_argument("--gateway-port", type=_positive_int, default=18443)
-    quick.add_argument("--simulator-port", type=_positive_int, default=19443)
+    quick.add_argument("--adapter-port", type=_positive_int, default=19443)
     quick.add_argument("--metrics-port", type=_positive_int, default=19100)
     _request_options(quick, required=False)
     quick.set_defaults(func=_demo)
@@ -117,7 +126,7 @@ def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None
     prompt = parser.add_mutually_exclusive_group(required=required)
     prompt.add_argument("--prompt", help="prompt text")
     prompt.add_argument("--prompt-file", type=Path, help="UTF-8 prompt file")
-    parser.add_argument("--model", default="mock-model")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-output-tokens", type=_positive_int, default=512)
     parser.add_argument("--stream", action="store_true")
     parser.add_argument("--request-id", type=UUID, help="request UUID; generated when absent")
@@ -147,7 +156,7 @@ def _demo(args: argparse.Namespace) -> int:
             args.directory,
             args.manifest,
             gateway_port=args.gateway_port,
-            simulator_port=args.simulator_port,
+            adapter_port=args.adapter_port,
             metrics_port=args.metrics_port,
         )
 
@@ -155,7 +164,7 @@ def _demo(args: argparse.Namespace) -> int:
         runtimes: list[Runtime] = []
         tasks: list[asyncio.Task[None]] = []
         try:
-            for role in (PeerRole.SIMULATOR, PeerRole.GATEWAY, PeerRole.CLIENT):
+            for role in (PeerRole.ADAPTER, PeerRole.GATEWAY, PeerRole.CLIENT):
                 runtimes.append(load_runtime(args.directory / f"{role.value}.json", role))
             set_log_level(runtimes[2].gateway.log_level)
             for runtime in runtimes[:2]:
@@ -172,7 +181,7 @@ def _demo(args: argparse.Namespace) -> int:
                 finally:
                     waiter.cancel()
                     await asyncio.gather(waiter, return_exceptions=True)
-            await run_client(runtimes[2], request, stream=args.stream, write=sys.stdout.write)
+            await run_client(runtimes[2], request, stream=args.stream, write=_write_stdout)
         finally:
             for task in reversed(tasks):
                 task.cancel()
@@ -189,7 +198,7 @@ def _init_demo(args: argparse.Namespace) -> int:
         args.directory,
         args.manifest,
         gateway_port=args.gateway_port,
-        simulator_port=args.simulator_port,
+        adapter_port=args.adapter_port,
         metrics_port=args.metrics_port,
     )
     print("demo configuration created")
@@ -227,7 +236,7 @@ def _client(args: argparse.Namespace) -> int:
     runtime = load_runtime(args.config, PeerRole.CLIENT)
     set_log_level(runtime.gateway.log_level)
     request = _request(args)
-    asyncio.run(run_client(runtime, request, stream=args.stream, write=sys.stdout.write))
+    asyncio.run(run_client(runtime, request, stream=args.stream, write=_write_stdout))
     return 0
 
 

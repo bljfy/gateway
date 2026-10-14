@@ -1,6 +1,6 @@
 # 公共接口约定
 
-接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "1.0"`。安全层见 `gateway.crypto`、`gateway.protocol`、`gateway.session` 与 [protocol.md](protocol.md)；业务层见 `gateway.client`、`gateway.simulator`、`gateway.server`。真实工厂和角色入口由 `gateway.runtime` 接线。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
+接口位于 `src/gateway/contracts.py`，契约版本为 `CONTRACT_VERSION = "2.0"`。安全层见 `gateway.crypto`、`gateway.protocol`、`gateway.session` 与 [protocol.md](protocol.md)；业务层见 `gateway.client`、`gateway.adapter`、`gateway.server`。真实工厂和角色入口由 `gateway.runtime` 接线。`Protocol` 用于结构化类型检查，不创建可运行服务，也不证明对象具备安全性。
 
 ## 三线边界
 
@@ -9,10 +9,20 @@
 | `CryptoBackend` | A | A 的安全协议 | 随机数、SM2 签名与加解密、SM4-GCM、HMAC-SM3；同步调用，由 A 管理阻塞执行 |
 | `SecureSession` | A | B、C | 异步握手、发送、认证后接收及幂等关闭 |
 | `SessionManager` | A | B、C | 出站 `open(peer)`、入站 `accept(reader, writer)`、轮换和统一关闭 |
-| `InferenceService` | B 的转发服务、C 的客户端和模拟推理 | 各业务调用层 | `complete(request)` 返回普通响应；`stream(request)` 为可选流式扩展 |
+| `InferenceService` | B 的转发服务、C 的客户端和模型推理 | 各业务调用层 | `complete(request)` 返回普通响应；`stream(request)` 为可选流式扩展 |
 | `AuditSink` | B | B 的网关与 A 的安全事件适配层 | 有界队列 `publish(event)`；返回 False 时拒绝接纳新业务 |
 
 `SessionManager.open` 从可信配置解析 peer 的地址、身份和策略，调用方不能传任意上游地址。`accept` 校验入站实体后才返回 ACTIVE 会话，失败负责关闭输入传输；不得信任对端自报身份。创建 manager 的具体工厂和配置加载由 A、B 联合确定，不在业务层重复实现密码逻辑。
+
+## Adapter 与供应商接口
+
+`gateway.adapter.AdapterServer(provider, limits=...)` 负责已认证安全会话的请求组装、UUID 绑定、响应分片、截止和取消，不处理供应商专用 SDK 参数。
+
+`ModelProvider` 位于 `gateway.adapter.provider`，提供 `async complete(request) -> InferenceResponse`、`stream(request) -> AsyncGenerator[InferenceChunk, None]` 与 `async close() -> None`。流可以显式 aclose；序号从 0 连续递增，仅正常完成时返回一个最终分片。供应商实现必须返回同一请求 UUID，输出首行包含时间戳和 UUID。
+
+`create_provider(AdapterConfig, Limits)` 显式注册供应商，目前创建 `DeepSeekProvider`。新增供应商时实现该接口、注册工厂并补充配置与契约测试；目标地址及凭据只来自可信 adapter 配置。
+
+角色为 `client`、`gateway`、`adapter`，会话授权关系为 client→gateway 与 gateway→adapter。契约 2.0 删除旧 simulator 角色及入口；安全记录版本、业务载荷编码仍为 1。迁移见 [部署说明](deployment.md#从模拟服务迁移)。
 
 ## 数据与标识
 
@@ -25,9 +35,9 @@
 
 DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反序列化仍须验证类型、字段、总量及授权，不把 dataclass 当作完整的网络输入校验器。提示词、检索片段、输出及记录明文不进入默认 `repr`，日志仍须使用白名单。
 
-业务载荷的线格式由 C 在 `src/gateway/codec.py` 统一编码（版本化、显式长度、拒绝尾随字节），请求可携带流式标志；`InferenceResponse` 的编码见该模块。逻辑消息跨记录的拆分与组装由 `src/gateway/framing.py` 提供，客户端与模拟服务端共用同一边界校验。
+业务载荷的线格式由 C 在 `src/gateway/codec.py` 统一编码（版本化、显式长度、拒绝尾随字节），请求可携带流式标志；`InferenceResponse` 的编码见该模块。逻辑消息跨记录的拆分与组装由 `src/gateway/framing.py` 提供，客户端与 adapter 共用同一边界校验。
 
-模拟响应的 `output` 以一行 JSON 开头，包含 UTC 毫秒时间戳 `timestamp` 和与 DTO 一致的 `request_id`，换行后为原模拟业务正文。`max_output_tokens` 仅截断业务正文；元数据仍计入响应字节限额。流式调用在整个输出开头包含一次元数据，可能跨分片。调用方需要固定正文校验时先分离第一行；完整响应含动态时间，格式和示例见 [使用说明](usage.md#响应标识与运行日志)。
+模型响应的 `output` 以一行 JSON 开头，包含 UTC 毫秒时间戳 `timestamp` 和与 DTO 一致的 `request_id`，换行后为模型回答。`max_output_tokens` 映射为模型输出 token 上限；元数据仍计入响应字节限额。流式调用在整个输出开头包含一次元数据，可能跨分片。调用方需要固定正文校验时先分离第一行；完整响应含动态时间，格式和示例见 [使用说明](usage.md#响应标识与运行日志)。
 
 编码后请求最多 1 MiB、普通响应最多 16 MiB，均包含编码头部；组装在保留下一片前检查字节与记录开销，拒绝空的非末片。运行配置可以降低限额。合法心跳不进入业务组装，非法控制记录拒绝。流式 UTF-8 解码支持字符跨记录边界。
 
@@ -37,7 +47,7 @@ DTO 是冻结的内部数据对象，对重要长度和范围提供检查；反�
 
 错误分为 `AuthenticationError`、`SessionExpiredError`、`ProtocolError` 和 `CapacityError`，均继承 `GatewayError`。认证失败或写入失败使当前会话不可继续业务；取消应清理关联任务和资源，保留 `asyncio.CancelledError` 的传播语义。`close()` 可重复调用。
 
-`SessionClosedError` 是兼容契约 1.0 的新增 `ProtocolError` 子类，仅表示认证 CLOSE/CLOSE_ACK 已完成并清理。消费者先单独处理此类型，再处理真正协议错误；不能依据异常文本或 CLOSED 状态推断正常关闭。共享会话的 `send()` 一旦开始，不应随单个请求取消而中断；业务层须在原请求截止内等待该条发送结束，并保留取消传播及资源清理。
+`SessionClosedError` 是继承自契约 1.0 的 `ProtocolError` 子类，仅表示认证 CLOSE/CLOSE_ACK 已完成并清理。消费者先单独处理此类型，再处理真正协议错误；不能依据异常文本或 CLOSED 状态推断正常关闭。共享会话的 `send()` 一旦开始，不应随单个请求取消而中断；业务层须在原请求截止内等待该条发送结束，并保留取消传播及资源清理。
 
 SM4-GCM 后端的 `seal_sm4_gcm` 返回密文与 16 字节标签拼接，`open_sm4_gcm` 必须先完成认证才返回完整明文，否则抛出 `AuthenticationError`。SM2 密钥、签名和密文的字节编码由 A 在 `docs/protocol.md` 固定并提供互操作测试；B、C 不直接调用这些原始密码接口。
 

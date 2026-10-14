@@ -13,9 +13,9 @@ from gateway.metrics import Metrics, start_metrics_server
 
 def test_config_defaults_and_custom_limits(tmp_path):
     path = tmp_path / "gateway.toml"
-    path.write_text('[upstream]\npeer_id="simulator"\n[limits]\nmax_pending=7', encoding="utf-8")
+    path.write_text('[upstream]\npeer_id="adapter"\n[limits]\nmax_pending=7', encoding="utf-8")
     config = load_config(path)
-    assert config.upstream == PeerIdentity("simulator", PeerRole.SIMULATOR)
+    assert config.upstream == PeerIdentity("adapter", PeerRole.ADAPTER)
     assert config.limits.max_pending == 7
     assert config.tag_bytes == 16
 

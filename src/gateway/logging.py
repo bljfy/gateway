@@ -87,7 +87,7 @@ def _safe_value(name: str, value: object) -> str | int | float | bool | None:
             return number
     if name == "stream" and type(value) is bool:
         return value
-    if name == "role" and type(value) is str and value in {"client", "gateway", "simulator"}:
+    if name == "role" and type(value) is str and value in {"client", "gateway", "adapter"}:
         return value
     if name == "result" and type(value) is str and value in RESULTS:
         return value

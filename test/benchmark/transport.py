@@ -31,7 +31,7 @@ from gateway.protocol import HEADER, read_frame, write_frame
 def certificates(directory: Path) -> None:
     """Fresh per-role self-signed P-256 certificates, explicitly trusted by peers."""
     now = datetime.now(UTC)
-    for role in ("client", "gateway", "simulator"):
+    for role in ("client", "gateway", "adapter"):
         key = ec.generate_private_key(ec.SECP256R1())
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, role)])
         cert = (

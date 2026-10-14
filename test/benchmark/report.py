@@ -260,7 +260,7 @@ def main():
                 "bidirectional_mib_s",
                 "cpu_client",
                 "cpu_gateway",
-                "cpu_simulator",
+                "cpu_adapter",
                 "rss_total_peak_bytes",
             ]
         )

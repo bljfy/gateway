@@ -11,7 +11,7 @@ import pytest
 
 from gateway.crypto import GmSSLBackend
 from gateway.runtime import prepare_demo
-from test.fixtures.simulator_output import response_body
+from test.fixtures.adapter_output import response_body
 from test.integration.test_topology import ports
 
 
@@ -26,12 +26,12 @@ async def test_three_process_cli_roundtrip_metrics_and_shutdown(
     )
     directory = tmp_path / "process-demo"
     gp, sp, mp = ports()
-    prepare_demo(directory, manifest, gateway_port=gp, simulator_port=sp, metrics_port=mp)
+    prepare_demo(directory, manifest, gateway_port=gp, adapter_port=sp, metrics_port=mp)
     processes: list[subprocess.Popen[str]] = []
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     root = Path(__file__).resolve().parents[2]
     try:
-        for role in ("simulator", "gateway"):
+        for role in ("adapter", "gateway"):
             process = subprocess.Popen(
                 [
                     sys.executable,
@@ -99,7 +99,7 @@ async def test_three_process_cli_roundtrip_metrics_and_shutdown(
         assert b"200 OK" in metrics and b"gateway_requests_completed_total 3" in metrics
         assert b"private-marker" not in metrics
     finally:
-        for role in ("gateway", "simulator"):
+        for role in ("gateway", "adapter"):
             (directory / f"{role}.stop").write_text("stop", encoding="ascii")
         for process in reversed(processes):
             try:

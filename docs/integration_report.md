@@ -1,5 +1,13 @@
 # 三程序整合报告
 
+## Adapter 迁移补充验证
+
+2026-10-14 从基准 5fdd209 将生产推理侧迁移为 adapter/provider，契约 2.0。链路为用户客户端→国密网关→adapter→DeepSeek，前两段国密会话，最后一段 HTTPS。DeepSeekProvider 使用锁定 openai==3.31.0 的异步 SDK，默认 deepseek-flash、关闭思考模式；旧配置迁移见 [部署说明](deployment.md#从模拟服务迁移)。下文历史整合与性能记录保留其原实现和统计。
+
+Windows x86_64 / Python 3.12.11 / uv 0.8.22 / GmSSL 3.1.1 完整本地回归：388 通过、5 跳过、1 外部 e2e 排除，53.89 秒。跳过项为未配置 Git Bash 的 Linux bootstrap。Ruff 检查、格式检查、mypy 和 diff 空白检查通过；模型侧使用测试 provider 或回环 HTTP/SSE，三进程与双链路使用真实 GmSSL。
+
+新增验证覆盖 CLI 流式每块刷新、SDK 参数映射、检索片段顺序、token 预算、Unicode 增量、空事件、唯一最终片、API 错误与禁用重试、断流、响应预算、超时、取消、提前关闭、消费者停顿后的绝对截止、provider UUID/序号校验及凭据缺失时不监听端口。报告为本地 artifacts/adapter-junit.xml，历史报告不改写。未调用真实 DeepSeek，未执行本次 Linux 回归、长负载矩阵或生产部署。
+
 日期：2026-10-05。范围为 PR 合并后的缺陷修复、A/B/C 接线、运行入口、文档整理及本地端到端验证。
 
 ## 来源与实现

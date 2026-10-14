@@ -1,6 +1,6 @@
 # B 线：网关配置、转发与隐私审计
 
-公共契约为 1.0。实现 `GatewayServer`、`ForwardingService`、`load_config`、`PrivacyAudit` 与本机 `/metrics`，由 `gateway.runtime` 连接真实安全层及业务层。
+公共契约为 2.0。实现 `GatewayServer`、`ForwardingService`、`load_config`、`PrivacyAudit` 与本机 `/metrics`，由 `gateway.runtime` 连接真实安全层及业务层。
 `test/unit/gateway/` 的会话替身用于验证 B 的边界；真实安全与三程序结果见 [整合报告](integration_report.md)。
 分工与合并流程见 [实现方案](implementation_plan.md#13-实施顺序)。
 
@@ -13,7 +13,7 @@
 
 ```toml
 [upstream]
-peer_id = "simulator"
+peer_id = "adapter"
 key_version = 1
 
 [gateway]
@@ -45,19 +45,19 @@ max_pending = 100
 max_plaintext_bytes_per_direction = 1073741824
 ```
 
-除 `upstream.peer_id` 外均有上述默认值。角色固定为 `simulator`，地址、公钥、私钥、
+除 `upstream.peer_id` 外均有上述默认值。角色固定为 `adapter`，地址、公钥、私钥、
 信任有效期和身份授权由 A 的可信 `SessionManager` 工厂解析。业务记录不能改变目标。
 配置只在重启时重建；没有热更新或跳过认证的运行选项。
 
 ## 三角色运行配置
 
-`init-demo` 生成 `client.json`、`gateway.json`、`simulator.json`。每个 JSON 最多 64 KiB，拒绝未知字段、错误角色、重复信任身份和非法类型。路径相对 JSON 所在目录解析，也接受受运维控制的绝对路径。实际生成文件是可直接运行的配置示例。
+`init-demo` 生成 `client.json`、`gateway.json`、`adapter.json`。每个 JSON 最多 64 KiB，拒绝未知字段、错误角色、重复信任身份和非法类型。路径相对 JSON 所在目录解析，也接受受运维控制的绝对路径。实际生成文件是可直接运行的配置示例。
 
 `init-demo` 默认目录为 `.tools/demo`，原生清单为 `.tools/gmssl/manifest.json`。`demo` 在目录不存在时调用同一初始化流程，存在时校验并复用配置；不会覆盖身份。独立角色命令默认读取 `.tools/demo/<角色>.json`，可用 `--config` 覆盖。所有默认路径相对命令执行目录；示例从仓库根目录运行。
 
 | 字段 | 内容 |
 | --- | --- |
-| `peer_id`、`role` | 本地身份和 `client` / `gateway` / `simulator` 角色，密钥版本固定为 1 |
+| `peer_id`、`role` | 本地身份和 `client` / `gateway` / `adapter` 角色，密钥版本固定为 1 |
 | `native_manifest` | 已校验原生库清单；`library` 和 `sha256` 必填，启动核对库哈希及版本 |
 | `signing_key`、`encryption_key` | 各自独立的加密 DER 私钥文件，每个最多 512 字节 |
 | `password_file` | 私钥导入口令文件，最多 1024 字节，按原始字节读取 |
@@ -65,11 +65,12 @@ max_plaintext_bytes_per_direction = 1073741824
 | `host`、`port` | 本地监听地址；演示固定回环，端口范围 1–65535 |
 | `target` | 客户端指向信任表中的网关身份 |
 | `audit_file` | 网关本地审计 JSONL 文件，默认 `audit.jsonl` |
+| `provider`、`base_url`、`api_key_env` | adapter 的供应商、API 地址与凭据环境变量名，详见模型连接配置 |
 | `trust` | 最多 64 个预置公钥身份，见下文 |
 
-每条信任记录包含 `peer_id`、`role`、`signing_public_key`、`encryption_public_key`（十六进制公钥）；出站目标另需 `host`、`port`。`enabled` 默认为 true，`expires_at` 为 Unix 秒时间戳，演示默认 4102444800；部署时设置实际有效期。客户端仅信任网关，模拟器仅信任网关，网关信任客户端与固定模拟器。业务请求不能修改信任表。口令文件与加密私钥同目录仅用于本地原型，生产密钥托管另行配置。
+每条信任记录包含 `peer_id`、`role`、`signing_public_key`、`encryption_public_key`（十六进制公钥）；出站目标另需 `host`、`port`。`enabled` 默认为 true，`expires_at` 为 Unix 秒时间戳，演示默认 4102444800；部署时设置实际有效期。客户端仅信任网关，adapter 仅信任网关，网关信任客户端与固定 adapter。业务请求不能修改信任表。口令文件与加密私钥同目录仅用于本地原型，生产密钥托管另行配置。
 
-原生线帧上限固定为 131072，运行加载器拒绝其他值；记录明文配置可降低至 1 字节，由客户端、网关、模拟器共同执行。演示将队列预算设为 2 MiB，以容纳最多 1 MiB 载荷及每片 128 字节的计费开销；大量小分片仍可能先触发队列预算。启动命令与原生加载环境见 [使用说明](usage.md)。
+原生线帧上限固定为 131072，运行加载器拒绝其他值；记录明文配置可降低至 1 字节，由客户端、网关、adapter 共同执行。演示将队列预算设为 2 MiB，以容纳最多 1 MiB 载荷及每片 128 字节的计费开销；大量小分片仍可能先触发队列预算。启动命令与原生加载环境见 [使用说明](usage.md)。
 
 ## 接线与职责
 
@@ -86,7 +87,7 @@ metrics_server = await start_metrics_server(
 
 `manager` 必须是 A 的真实实现，且由应用独占生命周期；`relay.close()` 会关闭它。
 创建 manager 时必须同时传入 `config.session` 及线帧、方向字节预算等限制。
-契约 1.0 尚未定义 manager 工厂参数或剩余密钥寿命查询，B 不会自行模拟密码校验或延长期限。
+契约 2.0 未定义 manager 工厂参数或剩余密钥寿命查询，B 不会自行模拟密码校验或延长期限。
 原生密码、线帧长度、序列/nonce、方向累计字节预算、密钥寿命与轮换硬截止必须在 A 内部执行。
 CLI `gateway --config ...` 构造真实 manager、转发、审计输出和指标，关闭时统一清理；完整命令见使用说明。
 
@@ -125,9 +126,15 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 任何业务异常均不自动重试，不构造伪成功结束记录；已收到部分响应但无最终标志时，C 应判定截断。
 协议错误采用关闭当前入站连接的保守策略，其他并发请求一并终止。
 
+## 模型连接配置
+
+adapter.json 新增顶层 provider、base_url、api_key_env，默认分别为 deepseek、https://api.deepseek.com、DEEPSEEK_API_KEY。其他角色不接受这些字段。未知 provider、非法 URL 或环境变量名拒绝加载；仅 adapter 创建 provider 时读取凭据，缺失或空值拒绝启动。
+
+base_url 必须为 HTTPS，禁止 URL 凭据、查询和片段；仅回环 IP 可使用 HTTP 供本地测试。DEEPSEEK_BASE_URL 只影响 infer 和新生成的演示配置，已有 JSON 使用固定 base_url。SDK 使用系统证书和环境代理；失败返回固定错误。默认 deepseek-flash、关闭思考模式，max_output_tokens 为真实 token 上限。SDK 禁用重试，沿用 120 秒绝对业务截止，停机关闭 HTTP 流和客户端。
+
 ## 隐私审计与健康状态
 
-CLI 在 stderr 显示启动、认证、转发及停机过程，使用 `gateway.logging` 封装标准库 logging。共享 TOML 的 `[gateway].log_level` 支持 `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`，默认 `INFO`；大小写错误、未知级别和非字符串值拒绝启动，错误不回显配置内容。客户端、网关、模拟器与 demo 启动时应用配置；demo 使用客户端加载的共享配置。配置在重启时生效。`--quiet` 额外过滤 ERROR 以下的控制台日志；有效阈值为配置级别和 ERROR 中较高者。JSONL 审计不受过程日志阈值影响。
+CLI 在 stderr 显示启动、认证、转发及停机过程，使用 `gateway.logging` 封装标准库 logging。共享 TOML 的 `[gateway].log_level` 支持 `DEBUG`、`INFO`、`WARNING`、`ERROR`、`CRITICAL`，默认 `INFO`；大小写错误、未知级别和非字符串值拒绝启动，错误不回显配置内容。客户端、网关、adapter 与 demo 启动时应用配置；demo 使用客户端加载的共享配置。配置在重启时生效。`--quiet` 额外过滤 ERROR 以下的控制台日志；有效阈值为配置级别和 ERROR 中较高者。JSONL 审计不受过程日志阈值影响。
 
 运行日志只接纳 `LOG_EVENTS` 中的固定事件。元数据允许 UUID 类型的 `request_id` / `audit_id`、有限的字节数、分片数、端口和耗时、布尔 `stream`、固定角色与结果、IP 字面量；主机名及带作用域的 IPv6 地址脱敏。敏感字段（密钥、口令、令牌、提示词、检索片段、输出、请求/响应对象、异常等）输出 `[REDACTED]`；未知字段连字段名一并丢弃，非法元数据值脱敏，未知事件变为 `log_rejected`。不截取正文片段，不对任意对象调用 `repr` / `str`，不序列化嵌套载荷。所有级别执行同一规则。
 

@@ -85,7 +85,7 @@ def test_reject_damaged_evidence(fault):
 async def test_failed_child_does_not_skip_other_cleanup():
     stopped, joined, closed = [], [], []
     services = []
-    for name, status in (("simulator", 0), ("gateway", 1)):
+    for name, status in (("adapter", 0), ("gateway", 1)):
         process = SimpleNamespace(
             name=name,
             exitcode=status,
@@ -101,5 +101,5 @@ async def test_failed_child_does_not_skip_other_cleanup():
         services.append((process, pipe, stop, 0))
     with pytest.raises(RuntimeError, match="gateway"):
         await stop_services(services)
-    assert stopped == ["simulator", "gateway"]
-    assert joined == closed == ["gateway", "simulator"]
+    assert stopped == ["adapter", "gateway"]
+    assert joined == closed == ["gateway", "adapter"]

@@ -1,7 +1,7 @@
 """Deterministic, versioned, length-bounded encoding for business payloads.
 
 Business payloads are the plaintext carried inside authenticated records. The
-client and simulator business layers use this module to convert the shared DTOs
+client and adapter business layers use this module to convert the shared DTOs
 into bytes and back. The encoding is the single source of truth for the business
 wire format: fixed field order, explicit lengths and strict rejection of trailing
 bytes, so a malformed record cannot smuggle additional data past the decoder.

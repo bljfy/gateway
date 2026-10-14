@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TextIO, cast
 from uuid import uuid4
 
+from gateway.adapter import AdapterConfig, AdapterServer, ModelProvider, create_provider
 from gateway.audit import PrivacyAudit
 from gateway.client import InferenceClient
 from gateway.config import GatewayConfig, load_config, positive
@@ -20,7 +21,6 @@ from gateway.logging import EventLogger
 from gateway.metrics import Metrics, start_metrics_server
 from gateway.server import GatewayServer
 from gateway.session import LocalIdentity, SecuritySessionManager, TrustRecord
-from gateway.simulator import InferenceSimulator
 
 LOGGER = EventLogger(__name__)
 
@@ -75,6 +75,7 @@ class Runtime:
     listen: tuple[str, int]
     target: PeerIdentity | None
     audit_file: Path
+    adapter_config: AdapterConfig | None = None
 
 
 def load_runtime(path: Path, role: PeerRole) -> Runtime:
@@ -96,10 +97,24 @@ def load_runtime(path: Path, role: PeerRole) -> Runtime:
                 "port",
                 "target",
                 "audit_file",
+                "provider",
+                "base_url",
+                "api_key_env",
             },
         )
         if _text(data.get("role")) != role.value:
             raise ValueError("wrong runtime role")
+        adapter_config = None
+        provider_fields = {"provider", "base_url", "api_key_env"}
+        if role is PeerRole.ADAPTER:
+            defaults = AdapterConfig()
+            adapter_config = AdapterConfig(
+                _text(data.get("provider", defaults.provider)),
+                _text(data.get("base_url", defaults.base_url)),
+                _text(data.get("api_key_env", defaults.api_key_env)),
+            )
+        elif provider_fields & data.keys():
+            raise ValueError("provider configuration requires adapter role")
         config = load_config(base / _text(data.get("gateway_config")))
         backend = load_backend(base / _text(data.get("native_manifest")))
         password = read_bounded(base / _text(data.get("password_file")), 1024)
@@ -180,6 +195,7 @@ def load_runtime(path: Path, role: PeerRole) -> Runtime:
             (host, port),
             target,
             base / _text(data.get("audit_file", "audit.jsonl")),
+            adapter_config,
         )
     except (ValueError, TypeError, KeyError, OSError, GatewayError):
         raise GatewayError("invalid runtime configuration") from None
@@ -190,15 +206,16 @@ def prepare_demo(
     manifest: Path,
     *,
     gateway_port: int = 18443,
-    simulator_port: int = 19443,
+    adapter_port: int = 19443,
     metrics_port: int = 19100,
 ) -> None:
     """Create fresh encrypted identities for an isolated local demonstration."""
-    ports = (gateway_port, simulator_port, metrics_port)
+    ports = (gateway_port, adapter_port, metrics_port)
     if len(set(ports)) != 3 or any(
         type(port) is not int or not 1 <= port <= 65535 for port in ports
     ):
         raise ValueError("demo ports must be distinct and valid")
+    adapter_config = AdapterConfig.from_environment()
     backend = load_backend(manifest)
     directory.mkdir(mode=0o700)
     if os.name == "nt":
@@ -229,7 +246,7 @@ def prepare_demo(
             target.write_bytes(content)
             target.chmod(0o600)
     (directory / "gateway.toml").write_text(
-        f'[upstream]\npeer_id="simulator"\n[gateway]\nmetrics_port={metrics_port}\n'
+        f'[upstream]\npeer_id="adapter"\n[gateway]\nmetrics_port={metrics_port}\n'
         'log_level="INFO"\n'
         "[limits]\nmax_queued_bytes_per_session=2097152\n",
         encoding="utf-8",
@@ -237,8 +254,8 @@ def prepare_demo(
     for role in PeerRole:
         peers = {
             PeerRole.CLIENT: [PeerRole.GATEWAY],
-            PeerRole.GATEWAY: [PeerRole.CLIENT, PeerRole.SIMULATOR],
-            PeerRole.SIMULATOR: [PeerRole.GATEWAY],
+            PeerRole.GATEWAY: [PeerRole.CLIENT, PeerRole.ADAPTER],
+            PeerRole.ADAPTER: [PeerRole.GATEWAY],
         }[role]
         trust = []
         for peer in peers:
@@ -251,7 +268,7 @@ def prepare_demo(
             if peer is not PeerRole.CLIENT:
                 item.update(
                     host="127.0.0.1",
-                    port=gateway_port if peer is PeerRole.GATEWAY else simulator_port,
+                    port=gateway_port if peer is PeerRole.GATEWAY else adapter_port,
                 )
             trust.append(item)
         data: dict[str, object] = {
@@ -264,18 +281,28 @@ def prepare_demo(
             "trust": trust,
             "gateway_config": "gateway.toml",
             "host": "127.0.0.1",
-            "port": simulator_port if role is PeerRole.SIMULATOR else gateway_port,
+            "port": adapter_port if role is PeerRole.ADAPTER else gateway_port,
             "audit_file": "audit.jsonl",
         }
         if role is PeerRole.CLIENT:
             data["target"] = "gateway"
+        if role is PeerRole.ADAPTER:
+            data.update(
+                provider=adapter_config.provider,
+                base_url=adapter_config.base_url,
+                api_key_env=adapter_config.api_key_env,
+            )
         (directory / f"{role.value}.json").write_text(
             json.dumps(data, indent=2) + "\n", encoding="utf-8"
         )
 
 
 async def run_server(
-    runtime: Runtime, *, stop: asyncio.Event | None = None, ready: Callable[[], None] | None = None
+    runtime: Runtime,
+    *,
+    stop: asyncio.Event | None = None,
+    ready: Callable[[], None] | None = None,
+    provider: ModelProvider | None = None,
 ) -> None:
     manager = runtime.manager
     role = manager.local.peer.role.value
@@ -286,7 +313,7 @@ async def run_server(
     audit_output: TextIO | None = None
     audit = PrivacyAudit(runtime.gateway.audit_capacity, runtime.gateway.security_audit_capacity)
     relay = GatewayServer(manager, runtime.gateway, audit, Metrics())
-    simulator = InferenceSimulator(limits=runtime.gateway.limits)
+    adapter: AdapterServer | None = None
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         current = asyncio.current_task()
@@ -297,8 +324,9 @@ async def run_server(
             if manager.local.peer.role is PeerRole.GATEWAY:
                 await relay.handle(reader, writer)
             else:
+                assert adapter is not None
                 session = await manager.accept(reader, writer)
-                await simulator.serve(session)
+                await adapter.serve(session)
         except (GatewayError, OSError, TimeoutError):
             pass
         finally:
@@ -320,6 +348,14 @@ async def run_server(
             )
 
     try:
+        if manager.local.peer.role is PeerRole.ADAPTER:
+            if provider is None:
+                if runtime.adapter_config is None:
+                    raise GatewayError("adapter configuration missing")
+                provider = create_provider(runtime.adapter_config, runtime.gateway.limits)
+            adapter = AdapterServer(provider, limits=runtime.gateway.limits)
+        elif manager.local.peer.role is not PeerRole.GATEWAY:
+            raise GatewayError("invalid server role")
         if manager.local.peer.role is PeerRole.GATEWAY:
             # Open the output before announcing readiness; failures cannot leave a live server.
             audit_output = runtime.audit_file.open("a", encoding="utf-8", buffering=1)
@@ -359,6 +395,8 @@ async def run_server(
             await listener.wait_closed()
         if metrics_server:
             await metrics_server.wait_closed()
+        if provider is not None:
+            await provider.close()
         LOGGER.info("server_stopped", role=role)
 
 

@@ -23,8 +23,8 @@ from gateway.contracts import (
     VerifiedRecord,
 )
 from gateway.framing import recv_message
-from gateway.simulator import InferenceSimulator
 from test.fixtures.in_memory import SESSION_ID, InMemorySession, connect_pair
+from test.fixtures.mock_provider import MockProvider
 
 
 def record(
@@ -68,7 +68,7 @@ async def test_client_consumes_heartbeat(stream: bool) -> None:
 
 
 @pytest.mark.asyncio
-async def test_simulator_consumes_interleaved_heartbeat() -> None:
+async def test_adapter_consumes_interleaved_heartbeat() -> None:
     session = InMemorySession(PeerIdentity("gateway", PeerRole.GATEWAY))
     await session.handshake()
     rid = uuid4()
@@ -77,12 +77,12 @@ async def test_simulator_consumes_interleaved_heartbeat() -> None:
     session.enqueue(record(UUID(int=0), b"", kind=RecordType.HEARTBEAT))
     session.enqueue(record(rid, data[20:], 1, True, RecordType.REQUEST))
     session.enqueue(record(UUID(int=0), b"", kind=RecordType.CLOSE))
-    await InferenceSimulator().serve(session)
+    await MockProvider().serve(session)
     assert session.sent
 
 
 @pytest.mark.asyncio
-async def test_simulator_rejects_payload_identity_before_inference() -> None:
+async def test_adapter_rejects_payload_identity_before_inference() -> None:
     session = InMemorySession(PeerIdentity("gateway", PeerRole.GATEWAY))
     await session.handshake()
     session.enqueue(
@@ -93,7 +93,7 @@ async def test_simulator_rejects_payload_identity_before_inference() -> None:
         )
     )
     with pytest.raises(ProtocolError, match="identifiers"):
-        await InferenceSimulator().serve(session)
+        await MockProvider().serve(session)
     assert not session.sent
 
 
@@ -104,7 +104,7 @@ async def test_stream_aclose_releases_session() -> None:
     )
     await client_session.handshake()
     await server.handshake()
-    serving = asyncio.create_task(InferenceSimulator(stream_chunk_chars=8).serve(server))
+    serving = asyncio.create_task(MockProvider(stream_chunk_chars=8).serve(server))
     iterator = InferenceClient(client_session).stream(
         InferenceRequest(uuid4(), "model", "long output")
     )
@@ -138,7 +138,7 @@ async def test_client_serializes_concurrent_calls() -> None:
     )
     await client_session.handshake()
     await server.handshake()
-    serving = asyncio.create_task(InferenceSimulator().serve(server))
+    serving = asyncio.create_task(MockProvider().serve(server))
     client = InferenceClient(client_session)
     try:
         requests = [InferenceRequest(uuid4(), "model", str(index)) for index in range(4)]
@@ -150,24 +150,24 @@ async def test_client_serializes_concurrent_calls() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("consumer", ["complete", "stream", "simulator"])
+@pytest.mark.parametrize("consumer", ["complete", "stream", "adapter"])
 async def test_receivers_reject_records_above_configured_limit(consumer: str) -> None:
     session = InMemorySession(PeerIdentity("gateway", PeerRole.GATEWAY))
     await session.handshake()
     rid = uuid4()
     limits = replace(Limits(), max_record_plaintext_bytes=8)
-    kind = RecordType.REQUEST if consumer == "simulator" else RecordType.RESPONSE
+    kind = RecordType.REQUEST if consumer == "adapter" else RecordType.RESPONSE
     session.enqueue(record(rid, b"x" * 9, kind=kind))
     client = InferenceClient(session, limits)
     request = InferenceRequest(rid, "m", "x")
     with pytest.raises(ProtocolError, match="plaintext limit"):
-        if consumer == "simulator":
-            await InferenceSimulator(limits=limits).serve(session)
+        if consumer == "adapter":
+            await MockProvider(limits=limits).serve(session)
         elif consumer == "complete":
             await client.complete(request)
         else:
             await anext(client.stream(request))
-    if consumer == "simulator":
+    if consumer == "adapter":
         assert not session.sent
     else:
         assert session.state is SessionState.CLOSED

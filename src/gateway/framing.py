@@ -1,8 +1,8 @@
-"""Record framing helpers shared by the client and simulator business layers.
+"""Record framing helpers shared by the client and adapter business layers.
 
 Business messages may exceed the per-record plaintext limit and must be split
 into consecutive records. These helpers own that framing so the client and
-simulator share one encoding of a logical message across records; chunk order,
+adapter share one encoding of a logical message across records; chunk order,
 request identity and record type are validated on receive.
 """
 

@@ -12,7 +12,7 @@ import pytest
 
 from gateway.cli import main
 from gateway.crypto import GmSSLBackend
-from test.fixtures.simulator_output import response_body
+from test.fixtures.adapter_output import response_body
 from test.integration.test_topology import ports
 
 
@@ -39,7 +39,7 @@ def test_demo_reuses_identities_and_releases_ports(
         str(manifest),
         "--gateway-port",
         str(gp),
-        "--simulator-port",
+        "--adapter-port",
         str(sp),
         "--metrics-port",
         str(mp),
@@ -93,7 +93,7 @@ def test_demo_reuses_identities_and_releases_ports(
     prompt.write_text("synthetic-demo-marker-file", encoding="utf-8")
     streamed = run(["--prompt-file", str(prompt), "--stream"])
     assert streamed.returncode == 0
-    assert response_body(streamed.stdout) == "[mock:mock-model] synthetic-demo-marker-file\n"
+    assert response_body(streamed.stdout) == "[mock:deepseek-flash] synthetic-demo-marker-file\n"
     assert "synthetic-demo-marker" not in streamed.stderr
     assert keys == {path.name: path.read_bytes() for path in directory.glob("*.der")}
     audit = (directory / "audit.jsonl").read_text(encoding="utf-8")

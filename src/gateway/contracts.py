@@ -11,7 +11,7 @@ from enum import IntEnum, StrEnum
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "2.0"
 MAX_RECORD_PLAINTEXT = 65_536
 
 
@@ -51,7 +51,7 @@ class SessionState(StrEnum):
 class PeerRole(StrEnum):
     CLIENT = "client"
     GATEWAY = "gateway"
-    SIMULATOR = "simulator"
+    ADAPTER = "adapter"
 
 
 class Direction(IntEnum):
@@ -266,7 +266,7 @@ class SessionManager(Protocol):
 
 @runtime_checkable
 class InferenceService(Protocol):
-    """Implemented by C's client/simulator and B's forwarding service."""
+    """Implemented by C's client/adapter and B's forwarding service."""
 
     async def complete(self, request: InferenceRequest) -> InferenceResponse: ...
     def stream(self, request: InferenceRequest) -> AsyncIterator[InferenceChunk]:

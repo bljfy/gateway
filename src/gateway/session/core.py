@@ -409,7 +409,7 @@ class SecuritySession:
             raise
 
     def _direction(self, sending: bool) -> Direction:
-        # 方向以握手发起方为基准，而不是固定按 client/gateway/simulator 角色划分。
+        # 方向以握手发起方为基准，而不是固定按 client/gateway/adapter 角色划分。
         return (
             Direction.INITIATOR_TO_ACCEPTOR
             if self.initiator == sending
@@ -641,11 +641,11 @@ class SecuritySessionManager:
                 self._native_tasks.discard(task)
 
     def _trust(self, peer: PeerIdentity, *, outbound: bool) -> TrustRecord:
-        # 信任有效期使用墙上时钟；角色只允许 client→gateway→simulator 两段链路。
+        # 信任有效期使用墙上时钟；角色只允许 client→gateway→adapter 两段链路。
         entry = self.trust.get(peer.peer_id)
         now = self.wall_clock()
         pair = (self.local.peer.role, peer.role) if outbound else (peer.role, self.local.peer.role)
-        allowed = {(PeerRole.CLIENT, PeerRole.GATEWAY), (PeerRole.GATEWAY, PeerRole.SIMULATOR)}
+        allowed = {(PeerRole.CLIENT, PeerRole.GATEWAY), (PeerRole.GATEWAY, PeerRole.ADAPTER)}
         if (
             entry is None
             or entry.peer != peer

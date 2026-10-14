@@ -1,14 +1,26 @@
 # 测试规范
 
+## Adapter 验证
+
+当前角色链路为 client→gateway→adapter。普通本地回归使用真实 GmSSL 和注入的测试 provider；CLI 与 SDK 测试使用 test/fixtures/model_api.py 提供的回环 HTTP/SSE，合成凭据由测试夹具设置并隔离环境代理。它们验证模型接口接线、取消与安全链路，不证明 DeepSeek 远端服务可用。
+
+test/unit/application/test_deepseek.py 验证真实 SDK 参数映射、检索顺序、Unicode 流、空增量、唯一最终片、错误响应、断流、输出限额、超时和关闭清理。test/integration/ 覆盖双链路及三进程 adapter/demo；认证失败、篡改及重放检查 provider 调用次数。
+
+真实模型请求继续使用 e2e 标记，必须明确授权后执行；默认回归不因真实密钥存在而联网调用模型。历史回归记录保持原测试版本和统计，当前验证结果另行追加。
+
+获授权并配置模型凭据后，可执行 `uv run --locked pytest test/integration/test_model_e2e.py -m e2e`，以合成提示词验证一次普通请求和一次流式请求，各使用 32 token 上限。
+
+2026-10-14 在 Windows x86_64 / Python 3.12.11 / GmSSL 3.1.1 / openai 3.31.0 执行完整非 e2e 回归：388 项通过、5 项 Linux bootstrap 因未配置 Git Bash 跳过、1 项外部模型测试排除。Ruff check、format --check（src/test/scripts）、mypy（src/scripts）及 diff 空白检查通过。JUnit 位于本地忽略目录 artifacts/adapter-junit.xml，包含真实双国密链路、三进程 CLI 与本地模型 API。此次未验证 Linux 或真实 DeepSeek 远端。
+
 ## 配置与组织
 
 统一使用 pytest，测试放在 `test/`。首次实现功能前在 `pyproject.toml` 设置 `testpaths = ["test"]`、注册 `e2e` 标记，并通过 [uv](dependencies.md) 添加开发依赖。
 
 - 文件使用 `test_*.py`，函数使用 `test_*`，公共夹具放在 `test/conftest.py`。
-- 单元测试验证模块逻辑，集成测试验证本地客户端、网关与模拟服务端的完整交互。
+- 单元测试验证模块逻辑，集成测试验证本地客户端、网关与 adapter 的完整交互。
 - 新增功能提供对应测试，修复缺陷增加复现问题的回归测试；关联问题单时在测试附近注释编号。
 - 用参数化覆盖边界及异常输入，用临时目录隔离数据；测试不依赖执行顺序，不污染其他测试。
-- 日常集成测试使用本地模拟服务、运行时生成的测试密钥及合成数据。
+- 日常集成测试使用本地模型 API 替身或注入 provider、运行时生成的测试密钥及合成数据。
 
 ## 执行与判定
 

@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### 破坏性变更
+
+- 契约升级为 2.0：simulator 角色、模块与命令迁移为 adapter，simulate 改为 infer，--simulator-port 改为 --adapter-port。已有身份密钥可复用，角色与信任配置须同步更新，步骤见 [迁移说明](deployment.md#从模拟服务迁移)。
+- 生产推理接入真实模型，默认 deepseek-flash、关闭思考模式。max_output_tokens 改为真实模型 token 上限，回答不再是确定性回显。
+
+### 变更
+
+- 增加独立 AdapterServer、ModelProvider 扩展接口及 DeepSeekProvider，使用锁定 openai==3.31.0 的异步 SDK，支持普通与流式响应、绝对截止、取消清理和固定错误。
+- adapter 配置新增 provider、base_url、api_key_env；模型密钥由进程环境读取。demo 启动 adapter 与网关，infer 直接调用 provider；测试与性能工具使用 test/ 中的本地模型替身。
+- 同步架构、接口、运行配置、启动命令、安全边界、部署迁移及测试文档。
+
+
 ### 修复
 
 - 修复 Linux CI 中 demo 停机端口检查误报 `Address already in use`：使用 `socket.create_server` 重新监听，允许 POSIX 复用 TIME_WAIT 地址，同时继续拒绝仍被活跃监听器占用的端口。

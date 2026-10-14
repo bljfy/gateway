@@ -160,32 +160,32 @@ def test_ipv6_scope_and_hostname_are_not_logged():
 @pytest.mark.parametrize("level", LEVELS)
 def test_log_level_configuration(tmp_path, level):
     path = tmp_path / "gateway.toml"
-    path.write_text(f'[upstream]\npeer_id="simulator"\n[gateway]\nlog_level="{level}"')
+    path.write_text(f'[upstream]\npeer_id="adapter"\n[gateway]\nlog_level="{level}"')
     assert load_config(path).log_level == level
 
 
 @pytest.mark.parametrize("value", ['"debug"', '"SYNTHETIC_SECRET"', "true", "10", "[]"])
 def test_invalid_log_level_configuration_does_not_echo(tmp_path, value):
     path = tmp_path / "gateway.toml"
-    path.write_text(f'[upstream]\npeer_id="simulator"\n[gateway]\nlog_level={value}')
+    path.write_text(f'[upstream]\npeer_id="adapter"\n[gateway]\nlog_level={value}')
     with pytest.raises(ValueError, match="^invalid gateway configuration$"):
         load_config(path)
 
 
 def test_default_and_direct_config_validation():
-    config = GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR))
+    config = GatewayConfig(PeerIdentity("adapter", PeerRole.ADAPTER))
     assert config.log_level == "INFO"
     with pytest.raises(ValueError, match="^invalid log level$"):
         replace(config, log_level="SYNTHETIC_SECRET")
 
 
-@pytest.mark.parametrize("command", ["gateway", "simulator", "client", "demo"])
+@pytest.mark.parametrize("command", ["gateway", "adapter", "client", "demo"])
 @pytest.mark.parametrize(
     "level,quiet,expected",
     [("DEBUG", False, True), ("ERROR", False, False), ("DEBUG", True, False)],
 )
 def test_cli_applies_loaded_level(command, level, quiet, expected, monkeypatch, tmp_path, capsys):
-    config = GatewayConfig(PeerIdentity("simulator", PeerRole.SIMULATOR), log_level=level)
+    config = GatewayConfig(PeerIdentity("adapter", PeerRole.ADAPTER), log_level=level)
 
     async def close():
         pass

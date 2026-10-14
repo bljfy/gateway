@@ -126,7 +126,7 @@ class TestSession:
     __test__ = False
 
     def __init__(self) -> None:
-        self._peer = PeerIdentity("simulator", PeerRole.SIMULATOR)
+        self._peer = PeerIdentity("adapter", PeerRole.ADAPTER)
         self._state = SessionState.NEW
         self._record: VerifiedRecord | None = None
 
