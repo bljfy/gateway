@@ -82,6 +82,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         content_types = {
             "index.html": "text/html",
             "app.js": "application/javascript",
+            "output.js": "application/javascript",
+            "markdown-it.min.js": "application/javascript",
             "style.css": "text/css",
         }
         if name not in content_types:

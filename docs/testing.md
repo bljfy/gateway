@@ -2,6 +2,8 @@
 
 ## WebUI 验证
 
+Markdown 与元数据展示的前端回归使用 `node test/frontend/test_output.cjs`，无需 npm 安装。覆盖普通／流式、多处分片及逐字符首行、无换行 JSON、取消／失败时部分前缀、标题列表表格代码、危险 HTML／链接与图片外联。Node 仅为此独立开发测试提供 JavaScript 运行时，不是部署依赖。
+
 新增 `test/unit/application/test_webui.py` 与 `test/integration/test_webui.py`，测试本地 HTTP／WebSocket 控制接口、Host／Origin／请求标识、配置旁文件恢复、字段和角色拒绝、认证失败、端口占用、普通／流式 Unicode 与检索片段、UUID、输出隔离、生命周期及取消清理。测试身份运行时生成，模型使用回环 SDK API 或 test/ 内 provider；不调用真实模型。
 
 ```powershell

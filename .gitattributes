@@ -3,3 +3,5 @@
 *.py text eol=lf
 *.toml text eol=lf
 *.yml text eol=lf
+# 保留第三方浏览器构建的原始字节，保证发布校验值跨平台一致。
+src/gateway/webui/static/markdown-it.min.js -text

@@ -4,6 +4,19 @@ const titles = {client: "客户端 · 推理操作台", gateway: "网关 · 安�
 const errors = {config_invalid:"配置校验失败。请检查本地文件、角色、身份、原生库及连接参数。", config_required:"请先加载本地身份配置。", busy:"当前有任务或服务正在运行，请先停止。", service_failed:"服务启动或运行失败。请检查端口占用、凭据、审计目录和本地配置。", connection_failed:"网关认证失败。请检查目标地址、信任公钥、有效期和对端服务。", inference_failed:"推理未完成。请检查网关与 Adapter 状态、模型凭据或超时设置。", request_invalid:"请求参数无效或超过限额。", socket_required:"页面连接已断开，请等待重新连接后再发送。", origin_rejected:"本地来源校验失败，请使用启动时显示的 127.0.0.1 地址。", request_mismatch:"请求已变化，请刷新状态后重试。", capacity_rejected:"页面连接数量已达上限。", request_too_large:"请求体过大，请缩短提示词或检索片段。"};
 let state = {}, settings = {}, peers = [], owner = null, currentId = null;
 let dirty = false, actionBusy = false, socket = null, closing = false, submitting = false;
+let answer = null, answerFrame = null;
+
+function renderAnswer(immediate = false) {
+  if (immediate && answerFrame !== null) { cancelAnimationFrame(answerFrame); answerFrame = null; }
+  const paint = () => {
+    answerFrame = null;
+    $("output").innerHTML = AnswerPresentation.render(answer?.text || "");
+    $("result-placeholder").hidden = Boolean(answer?.text);
+    $("output").scrollTop = $("output").scrollHeight;
+  };
+  if (immediate) paint();
+  else if (answerFrame === null) answerFrame = requestAnimationFrame(paint);
+}
 
 function notice(message) { $("notice").textContent = message || ""; $("notice").hidden = !message; }
 function message(code) { return errors[code] || "操作失败，请检查本地配置和服务状态。"; }
@@ -107,14 +120,14 @@ function connect() {
     else if (item.type === "output" || item.type === "finished") {
       if (submitting && currentId === null) currentId = item.request_id;
       if (item.request_id !== currentId) return;
-      $("request-id").textContent = "UUID  " + item.request_id;
-      if (item.type === "output") {$("output").textContent += item.output; $("result-placeholder").hidden = true; $("output").scrollTop = $("output").scrollHeight;}
-      else {resultStatus(item.result); if (item.error) notice(message(item.error));}
+      if (answer === null) answer = new AnswerPresentation.AnswerBuffer(item.request_id);
+      if (item.type === "output") {answer.append(item.output); renderAnswer();}
+      else {answer.finish(item.result === "completed"); renderAnswer(true); resultStatus(item.result); if (item.error) notice(message(item.error));}
     }
   };
   socket.onclose = () => {
     owner = null; $("socket-status").textContent = "页面连接已断开"; $("socket-status").classList.add("error");
-    if (currentId && state.busy) resultStatus("failed");
+    if (currentId && state.busy) {answer?.finish(false); renderAnswer(true); resultStatus("failed");}
     controls(); if (!closing) setTimeout(connect, 2000);
   };
 }
@@ -125,11 +138,11 @@ $("stop-service").onclick = () => action(async () => {render(await api("stop", "
 $("test").onclick = () => action(async () => {configured(); render(await api("test", "POST"));});
 $("infer").onclick = () => action(async () => {
   configured(); if (!$("prompt").value.trim()) throw new Error("请输入提示词。");
-  currentId = null; submitting = true; $("output").textContent = ""; $("result-placeholder").hidden = false;
-  resultStatus("running"); $("request-id").textContent = "正在建立安全会话…";
+  currentId = null; answer = null; submitting = true; renderAnswer(true);
+  resultStatus("running");
   try {
     const data = await api("infer", "POST", {owner, prompt:$("prompt").value, model:$("model").value, max_output_tokens:Number($("max_output_tokens").value), retrieval_context:[...document.querySelectorAll("#contexts textarea")].map(el=>el.value), stream:$("stream").checked});
-    currentId = data.request_id; $("request-id").textContent = "UUID  " + currentId;
+    currentId = data.request_id;
     render(await api("state"));
   } catch (error) {resultStatus("failed"); throw error;}
   finally {submitting = false;}
@@ -141,8 +154,8 @@ $("add-context").onclick = () => {
   row.className = "context-item"; area.rows = 2; area.placeholder = "检索片段内容"; area.setAttribute("aria-label", "检索片段");
   remove.textContent = "移除"; remove.className = "text-button"; remove.onclick = () => row.remove(); row.append(area,remove); $("contexts").append(row);
 };
-$("copy").onclick = () => action(async () => {await navigator.clipboard.writeText($("output").textContent); notice("结果已复制。");});
-$("clear").onclick = () => {currentId = null; $("output").textContent = ""; $("result-placeholder").hidden = false; $("request-id").textContent = "请求 UUID 将显示在这里"; resultStatus("idle");};
+$("copy").onclick = () => action(async () => {await navigator.clipboard.writeText(answer?.text || ""); notice("结果已复制。");});
+$("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true); resultStatus("idle");};
 document.querySelectorAll(".config-card input,.config-card select").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close();});

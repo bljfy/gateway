@@ -83,7 +83,7 @@ async def test_loopback_boundary_missing_config_resources_and_privacy(tmp_path):
         origin = str(ui.make_url("/")).rstrip("/")
         headers = {"Origin": origin, "X-WebUI-Request": "1"}
         assert (await ui.get("/")).status == 200
-        for name in ("style.css", "app.js"):
+        for name in ("style.css", "app.js", "output.js", "markdown-it.min.js"):
             response = await ui.get("/static/" + name)
             assert response.status == 200
             assert "default-src 'self'" in response.headers["Content-Security-Policy"]

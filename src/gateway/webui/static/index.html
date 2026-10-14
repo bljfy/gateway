@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>国密推理 · 本地控制台</title>
-  <link rel="stylesheet" href="/static/style.css"><script src="/static/app.js" defer></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/markdown-it.min.js" defer></script>
+  <script src="/static/output.js" defer></script><script src="/static/app.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -47,7 +49,7 @@
         <div class="actions"><button id="infer" class="primary">发送请求</button><button id="cancel" class="secondary" disabled>停止生成</button></div>
       </div>
       <div class="card result-card"><div class="section-heading"><div><span class="eyebrow">04 / RESPONSE</span><h2>推理结果</h2></div><span id="result-status" class="badge neutral">等待请求</span></div>
-        <div id="request-id" class="request-id">请求 UUID 将显示在这里</div><pre id="output" aria-label="模型输出"></pre><div id="result-placeholder">回答将在这里显示。<br><span>业务内容仅保留在当前页面。</span></div>
+        <div id="output" class="markdown-body" role="region" aria-label="模型输出"></div><div id="result-placeholder">回答将在这里显示。<br><span>业务内容仅保留在当前页面。</span></div>
         <div class="actions"><button id="copy" class="secondary">复制结果</button><button id="clear" class="text-button">清空结果</button></div>
       </div>
     </section>
