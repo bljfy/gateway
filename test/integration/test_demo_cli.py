@@ -100,8 +100,10 @@ def test_demo_reuses_identities_and_releases_ports(
     assert "synthetic-demo-marker" not in audit
     assert sum(json.loads(line)["result"] == "ok" for line in audit.splitlines()) == 2
     for port in (gp, sp, mp):
-        with socket.socket() as listener:
-            listener.bind(("127.0.0.1", port))
+        # POSIX TIME_WAIT is not a live listener. Re-listen with the same address
+        # reuse policy as asyncio; SO_REUSEPORT remains disabled.
+        with socket.create_server(("127.0.0.1", port)):
+            pass
 
 
 def test_demo_rejects_existing_incomplete_directory(tmp_path: Path) -> None:

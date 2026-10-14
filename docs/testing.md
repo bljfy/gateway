@@ -34,6 +34,10 @@ uv run --locked pytest test/ -m "not e2e"
 
 `test/integration/` 使用真实 GmSSL、临时生成的 SM2 身份和回环 TCP，包括三个独立 CLI 进程；属于本地测试，随全量非外部测试执行。必须先配置已校验原生库的 `GMSSL_LIBRARY`、`GMSSL_SHA256` 和加载路径，缺失时集成测试失败，不跳过。原生环境步骤见 [协议说明](protocol.md#原生环境)。
 
+demo 停机检查使用 `socket.create_server` 在原网关、模拟器与指标端口重新监听。POSIX 下该接口设置 SO_REUSEADDR，避免已关闭 TCP 连接的 TIME_WAIT 导致误报；Windows 下使用标准库的默认行为。SO_REUSEPORT 保持关闭，仍有活跃监听器时检查必须失败。正常/阻塞启动和普通/quiet 四组 demo 用例继续核查响应、身份复用、审计与停机。Linux CI [运行 37617741412](https://github.com/bljfy/gateway/actions/runs/37617741412) 原有四项失败均发生在普通 socket 的停机后 bind 检查，而业务调用已成功。
+
+2026-10-14 在 Ubuntu 24.04 / WSL2 / Python 3.12.11 / GmSSL 3.1.1 复现修复前 demo 测试：4 项失败、1 项通过，失败位置与上述 CI 一致。修复后 demo 测试 5 项通过，完整非 e2e 回归 356 项通过、无跳过；Linux Ruff check、format --check（src/test/scripts）、mypy（src/scripts）及 GmSSL 三项原生自测通过。Windows 同版本 Python/GmSSL 的 demo 测试 5 项通过。JUnit 复现、修复及全量报告保存在 `artifacts/linux-ci/`；这是本机验证，远端流水线须在提交推送后运行。
+
 ```powershell
 $manifest = Get-Content .tools/gmssl/manifest.json -Raw | ConvertFrom-Json
 $env:GMSSL_LIBRARY = $manifest.library

@@ -4,6 +4,8 @@
 
 ### 修复
 
+- 修复 Linux CI 中 demo 停机端口检查误报 `Address already in use`：使用 `socket.create_server` 重新监听，允许 POSIX 复用 TIME_WAIT 地址，同时继续拒绝仍被活跃监听器占用的端口。
+
 - 修复 PR [#2](https://github.com/bljfy/gateway/pull/2) 的业务组装无界累计、提前结束流遗留会话、心跳误拒绝和头部/载荷请求 UUID 不一致；补齐整个编码载荷预算、绝对超时、单会话读者串行化和跨记录 UTF-8 解码。
 
 - 修复网关将合法心跳当成协议错误、取消响应发送连带关闭其他请求、正常认证关闭误占安全审计队列的问题；新增兼容的 `SessionClosedError`，补充网关和真实安全会话回归测试。
