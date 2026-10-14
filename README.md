@@ -37,6 +37,8 @@ Linux 启动前设置 [原生库加载路径](docs/protocol.md#原生环境)。�
 
 默认模型为 `deepseek-flash`，关闭思考模式。`--model` 可指定模型，`--max-output-tokens` 为真实输出 token 上限，默认 512。响应以 UTC 时间戳和请求 UUID 的 JSON 行开头，随后为模型回答。`--quiet` 放在子命令前可隐藏过程日志。
 
+也可在命令执行目录创建 `.env`，填写 `DEEPSEEK_API_KEY` 和可选的 `DEEPSEEK_BASE_URL`，格式见 [环境与凭据](docs/usage.md#环境与凭据)。adapter、demo、infer 和 init-demo 自动加载该文件，已有进程环境变量优先；已有 adapter 配置仍使用 JSON 中的 `base_url`。
+
 `demo` 首次生成本地身份和配置，启动 adapter 与网关，发送请求后关闭服务；再次运行复用配置。已有旧配置先按 [迁移说明](docs/deployment.md#从模拟服务迁移) 更新。
 
 ## 独立程序与直接推理
@@ -82,6 +84,8 @@ sequenceDiagram
 ```
 
 ## 文档与源码
+
+2026-10-14 已完成真实 DeepSeek 三进程普通与流式请求复测，核对响应 UUID、成功审计及停机端口释放。首次请求曾失败，根因未确认；此次验证不代表稳定性、长负载或生产验收通过，详情见 [真实三进程验证](docs/integration_report.md#deepseek-真实三进程验证)。
 
 - [实现方案](docs/implementation_plan.md)：架构、安全边界、开发职责与验收。
 - [公共接口](docs/interfaces.md)：契约 2.0、adapter 和 provider 扩展接口。

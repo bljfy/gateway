@@ -9,6 +9,8 @@
 
 ### 变更
 
+- 同步 `.env` 自动加载的入口、查找目录和配置优先级，以及真实 DeepSeek 三进程验证状态；部署验收区分历史 wheel 冒烟与当前 adapter 依赖，保留首次真实请求失败、根因未确认及生产验收待完成的边界。
+
 - 增加独立 AdapterServer、ModelProvider 扩展接口及 DeepSeekProvider，使用锁定 openai==3.31.0 的异步 SDK，支持普通与流式响应、绝对截止、取消清理和固定错误。
 - adapter 配置新增 provider、base_url、api_key_env；模型密钥由进程环境读取。demo 启动 adapter 与网关，infer 直接调用 provider；测试与性能工具使用 test/ 中的本地模型替身。
 - 同步架构、接口、运行配置、启动命令、安全边界、部署迁移及测试文档。
