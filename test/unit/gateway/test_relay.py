@@ -104,6 +104,10 @@ class Writer:
     def close(self):
         self.closed = True
 
+    def get_extra_info(self, name):
+        assert name == "peername"
+        return ("127.0.0.1", 12345)
+
 
 class Manager:
     def __init__(self, inbound, upstream=None):
@@ -162,6 +166,13 @@ async def test_verified_request_forwarded_on_distinct_fixed_upstream_and_private
     assert inbound.sent[0] == (RecordType.RESPONSE, b"synthetic-output", request_id, 0, True)
     assert manager.opened[0].closed.is_set() and inbound.closed.is_set() and writer.closed
     assert server.metrics.active_sessions == 0
+    connections = server.connections.snapshot()
+    assert connections["total_active"] == 0
+    row = connections["recent"][0]
+    assert row["peer"] == "authenticated-client" and row["result"] == "closed"
+    assert row["received_bytes"] == len(b"sensitive-prompt-and-retrieval")
+    assert row["sent_bytes"] == len(b"synthetic-output")
+    assert "sensitive-prompt" not in json.dumps(connections)
     lines = []
     audit.drain(lines.append)
     assert "sensitive-prompt" not in "".join(lines) + caplog.text

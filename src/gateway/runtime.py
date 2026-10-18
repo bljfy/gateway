@@ -16,6 +16,7 @@ from gateway.adapter.server import AdapterMetrics
 from gateway.audit import PrivacyAudit
 from gateway.client import InferenceClient
 from gateway.config import GatewayConfig, load_config, positive
+from gateway.connections import ConnectionMonitor
 from gateway.contracts import GatewayError, InferenceRequest, PeerIdentity, PeerRole, SecureSession
 from gateway.crypto import GmSSLBackend
 from gateway.logging import EventLogger
@@ -97,6 +98,7 @@ class RuntimeStatus:
     adapter: AdapterMetrics = field(default_factory=AdapterMetrics)
     audit: PrivacyAudit | None = None
     authenticated_sessions: int = 0
+    connections: ConnectionMonitor = field(default_factory=ConnectionMonitor)
 
     def snapshot(self, runtime: Runtime) -> dict[str, object]:
         result: dict[str, object] = dict(runtime.manager.session_counts())
@@ -376,7 +378,7 @@ async def run_server(
     audit = PrivacyAudit(runtime.gateway.audit_capacity, runtime.gateway.security_audit_capacity)
     status = status if status is not None else RuntimeStatus()
     status.audit = audit
-    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics)
+    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics, status.connections)
     adapter: AdapterServer | None = None
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

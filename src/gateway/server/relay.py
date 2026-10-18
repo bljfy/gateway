@@ -6,6 +6,7 @@ from time import monotonic
 from uuid import UUID, uuid4
 
 from gateway.config import GatewayConfig
+from gateway.connections import Connection, ConnectionMonitor
 from gateway.contracts import (
     AuditEvent,
     AuditSink,
@@ -52,11 +53,13 @@ class GatewayServer:
         config: GatewayConfig,
         audit: AuditSink,
         metrics: Metrics | None = None,
+        connections: ConnectionMonitor | None = None,
     ) -> None:
         self.manager = manager
         self.config = config
         self.audit = audit
         self.metrics = metrics if metrics is not None else Metrics()
+        self.connections = connections if connections is not None else ConnectionMonitor()
         self._connections: set[asyncio.Task[None]] = set()
         self._pending = 0
         self._active = 0
@@ -87,6 +90,7 @@ class GatewayServer:
 
     async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Pass to asyncio.start_server; raw bytes never reach the relay directly."""
+        connection = self.connections.begin(writer.get_extra_info("peername"))
         if (
             self._closing
             or self._audit_failed
@@ -95,6 +99,7 @@ class GatewayServer:
         ):
             LOGGER.info("connection_rejected", result="capacity")
             self.metrics.increment("capacity_rejected")
+            self.connections.finish(connection, "capacity")
             writer.close()
             return
         current = asyncio.current_task()
@@ -104,6 +109,7 @@ class GatewayServer:
         self.metrics.pending_sessions += 1
         inbound: SecureSession | None = None
         activated = False
+        result = "closed"
         LOGGER.info("client_connection_received")
         try:
             try:
@@ -124,19 +130,28 @@ class GatewayServer:
             self._active += 1
             self.metrics.active_sessions += 1
             activated = True
+            connection.peer, connection.phase = inbound.peer.peer_id, "active"
             LOGGER.info("client_authenticated")
-            await self._serve(inbound)
+            await self._serve(inbound, connection)
         except asyncio.CancelledError:
+            result = "stopped"
             raise
         except AuthenticationError:
+            result = "authentication_failed"
             self.metrics.increment("integrity_failure")
             self._publish(AuditEvent("authentication_failed", "failed"), terminal=True)
         except CapacityError:
+            result = "capacity"
             self.metrics.increment("capacity_rejected")
             self._publish(AuditEvent("request_rejected", "capacity"))
         except ProtocolError:
+            result = "protocol_rejected"
             self._publish(AuditEvent("protocol_rejected", "invalid"), terminal=True)
+        except TimeoutError:
+            result = "timeout"
+            self._publish(AuditEvent("session_failed", "timeout"), terminal=True)
         except Exception:
+            result = "failed"
             # Exception text can contain business data; never pass it to logs or peers.
             self._publish(AuditEvent("session_failed", "failed"), terminal=True)
         finally:
@@ -149,6 +164,7 @@ class GatewayServer:
                     self.metrics.active_sessions -= 1
                 writer.close()
                 self._connections.discard(current)
+                self.connections.finish(connection, result)
                 LOGGER.info("client_connection_closed")
 
     async def _close_session(self, session: SecureSession) -> None:
@@ -158,7 +174,7 @@ class GatewayServer:
         except Exception:
             self._publish(AuditEvent("session_failed", "failed"), terminal=True)
 
-    async def _serve(self, inbound: SecureSession) -> None:
+    async def _serve(self, inbound: SecureSession, connection: Connection | None = None) -> None:
         requests: dict[UUID, _Request] = {}
         sending: set[asyncio.Task[None]] = set()
         send_lock = asyncio.Lock()
@@ -189,6 +205,8 @@ class GatewayServer:
                             finished.task.result()
                         queued -= finished.size
                         del requests[request_id]
+                        if connection:
+                            connection.inflight = len(requests)
                 if receiving not in done:
                     continue
                 try:
@@ -197,6 +215,8 @@ class GatewayServer:
                     return
                 receiving = None
                 header = record.header
+                if connection:
+                    connection.received_bytes += len(record.plaintext)
                 if header.direction is not Direction.INITIATOR_TO_ACCEPTOR:
                     raise ProtocolError("invalid inbound direction")
                 if len(record.plaintext) > self.config.limits.max_record_plaintext_bytes:
@@ -222,6 +242,8 @@ class GatewayServer:
                             )
                             queued -= cancelled.size
                             del requests[header.request_id]
+                            if connection:
+                                connection.inflight = len(requests)
                     continue
                 if header.record_type is not RecordType.REQUEST or header.request_id.int == 0:
                     raise ProtocolError("expected request")
@@ -237,6 +259,8 @@ class GatewayServer:
                     if not self._publish(AuditEvent("request_started", "accepted", item.audit_id)):
                         raise CapacityError("audit capacity exhausted")
                     requests[header.request_id] = item
+                    if connection:
+                        connection.inflight = len(requests)
                 if item.task is not None or header.chunk_index != len(item.records):
                     raise ProtocolError("invalid request fragment sequence")
                 if not record.plaintext and not header.end_of_message:
@@ -253,7 +277,7 @@ class GatewayServer:
                 queued += cost
                 if header.end_of_message:
                     item.task = asyncio.create_task(
-                        self._forward(inbound, item, send_lock, sending)
+                        self._forward(inbound, item, send_lock, sending, connection)
                     )
         finally:
             tasks: list[asyncio.Task[object]] = []
@@ -334,6 +358,7 @@ class GatewayServer:
         item: _Request,
         lock: asyncio.Lock,
         sending: set[asyncio.Task[None]],
+        connection: Connection | None = None,
     ) -> None:
         upstream: SecureSession | None = None
         reserved = False
@@ -406,6 +431,8 @@ class GatewayServer:
                         raise CapacityError("response body limit exceeded")
                     async with lock:
                         await self._send_response(inbound, response, item.deadline, sending)
+                        if connection:
+                            connection.sent_bytes += len(response.plaintext)
                     if header.end_of_message:
                         result = "ok"
                         self.metrics.increment("requests_completed")

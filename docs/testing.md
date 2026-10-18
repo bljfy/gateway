@@ -2,6 +2,10 @@
 
 ## WebUI 验证
 
+连接监控与模拟回归位于 `test/integration/test_webui_connections.py`，使用真实本机 GmSSL 和 TCP，不调用模型。覆盖并发连接来源和身份、网关 WebSocket 实时推送、非法帧／握手超时／认证后断开、网关恢复认证、输入与角色限制、停止批次、尚未执行即取消、页面断开及网关停止清理。`test/unit/gateway/test_relay.py` 同时核对连接记录的收发字节和正文隔离。
+
+2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成此功能回归：完整非 e2e 测试 437 项通过、5 项 Linux bootstrap 用例跳过、1 项外部模型用例排除，耗时 101.68 秒；Ruff check、format --check（src/test/scripts）、mypy（src/scripts）、前端语法和既有 27 个展示场景通过。浏览器实测五条正常认证连接逐条显示、停止后释放，以及五条非法协议帧连接被拒绝并保留近期记录。JUnit 为本地忽略目录 `artifacts/connections-junit.xml`。未运行 Linux、外部模型或长时间负载验收；独立 diff 审查未发现阻断问题。
+
 Markdown 与元数据展示的前端回归使用 `node test/frontend/test_output.cjs`，无需 npm 安装。覆盖普通／流式、多处分片及逐字符首行、无换行 JSON、取消／失败时部分前缀、标题列表表格代码、危险 HTML／链接与图片外联。Node 仅为此独立开发测试提供 JavaScript 运行时，不是部署依赖。
 
 新增 `test/unit/application/test_webui.py` 与 `test/integration/test_webui.py`，测试本地 HTTP／WebSocket 控制接口、Host／Origin／请求标识、配置旁文件恢复、字段和角色拒绝、认证失败、端口占用、普通／流式 Unicode 与检索片段、UUID、输出隔离、生命周期及取消清理。测试身份运行时生成，模型使用回环 SDK API 或 test/ 内 provider；不调用真实模型。

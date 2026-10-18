@@ -40,6 +40,21 @@
       <div class="actions"><button id="test" class="client-only secondary">测试网关认证</button><button id="start" class="server-only primary">启动本角色服务</button><button id="stop-service" class="server-only secondary">停止服务</button><span id="runtime-note" class="muted"></span></div>
       <div id="metrics" class="metrics"></div>
     </section>
+    <section class="card gateway-only" hidden>
+      <div class="section-heading"><div><span class="eyebrow">LIVE / CONNECTIONS</span><h2>实时连接监控</h2></div><span id="connection-count" class="badge">0 条进行中</span></div>
+      <p class="muted">每秒更新 · 展示客户端到网关的入站连接 · 收发量为已认证业务载荷字节</p>
+      <div class="table-scroll"><table class="connection-table"><thead><tr><th>连接 / 来源</th><th>认证身份</th><th>状态</th><th>持续时间</th><th>在途请求</th><th>接收 / 发送</th></tr></thead><tbody id="connections"></tbody></table></div>
+      <p id="connection-empty" class="empty-state">暂无进行中的连接。可在客户端启动连接模拟。</p>
+      <p id="connection-truncated" class="muted" hidden>当前只展示前 200 条连接，总数见上方。</p>
+      <details class="recent-connections"><summary>最近结束的连接（最多 100 条）</summary><div class="table-scroll"><table class="connection-table"><thead><tr><th>连接 / 来源</th><th>认证身份</th><th>结束原因</th><th>持续时间</th><th>在途请求</th><th>接收 / 发送</th></tr></thead><tbody id="recent-connections"></tbody></table></div></details>
+    </section>
+    <section class="card client-only" hidden>
+      <div class="section-heading"><div><span class="eyebrow">LAB / CLIENTS</span><h2>多客户端与异常连接模拟</h2></div><span id="simulation-phase" class="badge neutral">尚未运行</span></div>
+      <p class="muted">向当前已配置网关建立真实 TCP 连接；每条正常连接独立完成 SM2 认证，复用当前客户端身份。此实验只测试连接，不发送推理请求。</p>
+      <div class="form-grid"><label>连接类型<select id="simulation-mode"><option value="normal">正常认证并保持连接</option><option value="stalled_handshake">异常：TCP 建连后不发起握手</option><option value="malformed_frame">异常：发送非法协议帧</option><option value="abrupt_disconnect">异常：认证后突然断开</option></select></label><label>并发客户端数<input id="simulation-count" type="number" min="1" max="32" value="5"></label><label>最长保持时间（秒）<input id="simulation-duration" type="number" min="1" max="60" value="15"></label></div>
+      <div class="actions"><button id="simulation-start" class="primary">开始模拟</button><button id="simulation-stop" class="secondary" disabled>停止模拟</button><span id="simulation-summary" class="muted"></span></div>
+      <div class="table-scroll"><table class="connection-table"><thead><tr><th>模拟客户端</th><th>当前状态</th><th>结果</th></tr></thead><tbody id="simulation-clients"></tbody></table></div>
+    </section>
     <section class="client-only inference-grid">
       <div class="card"><div class="section-heading"><div><span class="eyebrow">03 / REQUEST</span><h2>推理请求</h2></div><span class="badge neutral">单轮推理</span></div>
         <label>提示词<textarea id="prompt" rows="6" placeholder="输入需要模型处理的问题…"></textarea></label>

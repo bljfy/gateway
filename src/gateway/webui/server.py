@@ -128,6 +128,17 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         await controller.cancel(text(values.get("request_id")))
         return web.json_response(controller.snapshot())
 
+    async def simulate(request: web.Request) -> web.Response:
+        await controller.simulate(await body(request))
+        return web.json_response(controller.snapshot(), status=202)
+
+    async def stop_simulation(_request: web.Request) -> web.Response:
+        if controller.role is not PeerRole.CLIENT:
+            raise ControlError("wrong_role", 404)
+        if controller.simulation and controller.simulation.phase == "running":
+            await controller.cancel()
+        return web.json_response(controller.snapshot())
+
     async def websocket(request: web.Request) -> web.WebSocketResponse:
         if len(sockets) >= SOCKET_CAPACITY:
             raise ControlError("capacity_rejected", 503)
@@ -219,6 +230,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.post("/api/test", test),
             web.post("/api/infer", infer),
             web.post("/api/cancel", cancel),
+            web.post("/api/simulation", simulate),
+            web.post("/api/simulation/stop", stop_simulation),
             web.get("/api/ws", websocket),
         ]
     )

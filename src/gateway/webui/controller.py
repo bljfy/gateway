@@ -15,6 +15,7 @@ from gateway.contracts import InferenceRequest, PeerRole, SecureSession
 from gateway.logging import EventLogger, PrivacyFormatter, set_log_level
 from gateway.runtime import Runtime, RuntimeStatus, run_server
 from gateway.webui.settings import Settings, inspect_settings, load_settings, table, text
+from gateway.webui.simulation import MAX_CLIENTS, MAX_DURATION, MODES, Simulation
 
 LOGGER = EventLogger(__name__)
 EVENT_CAPACITY = 128
@@ -65,6 +66,7 @@ class Controller:
         self.sockets: dict[str, asyncio.Queue[dict[str, object]]] = {}
         self.events: deque[dict[str, object]] = deque(maxlen=EVENT_CAPACITY)
         self.handler: EventHandler | None = None
+        self.simulation: Simulation | None = None
 
     async def initialize(self) -> None:
         self.handler = EventHandler(self)
@@ -88,6 +90,10 @@ class Controller:
             "model_verified": self.status.adapter.completed > 0,
             "metrics": self.status.snapshot(self.runtime) if self.runtime else {},
             "default_model": DEFAULT_MODEL,
+            "connections": self.status.connections.snapshot()
+            if self.role is PeerRole.GATEWAY
+            else None,
+            "simulation": self.simulation.snapshot() if self.simulation else None,
         }
 
     @property
@@ -317,6 +323,36 @@ class Controller:
         async with asyncio.timeout(5):
             await queue.put(item)
 
+    async def simulate(self, data: object) -> None:
+        async with self.lock:
+            if self.role is not PeerRole.CLIENT:
+                raise ControlError("wrong_role", 404)
+            self.editable()
+            try:
+                values = table(data, {"owner", "count", "duration", "mode"})
+                owner = text(values.get("owner"))
+                if owner not in self.sockets:
+                    raise ControlError("socket_required", 409)
+                count, duration = values.get("count"), values.get("duration")
+                mode = values.get("mode")
+                if type(count) is not int or not 1 <= count <= MAX_CLIENTS:
+                    raise ValueError
+                if type(duration) is not int or not 1 <= duration <= MAX_DURATION:
+                    raise ValueError
+                if not isinstance(mode, str) or mode not in MODES:
+                    raise ValueError
+            except ControlError:
+                raise
+            except Exception:
+                raise ControlError("request_invalid") from None
+            runtime = self.new_runtime()
+            self.simulation = Simulation(count, duration, mode, self.changed)
+            self.owner, self.request_id = owner, None
+            self.operation_runtime = runtime
+            self.error = None
+            self.operation = asyncio.create_task(self.simulation.run(runtime))
+            self.changed()
+
     async def _infer(
         self, runtime: Runtime, request: InferenceRequest, stream: bool, owner: str
     ) -> None:
@@ -390,6 +426,11 @@ class Controller:
                     await self.operation_runtime.manager.close()
                 if self.request_phase == "running":
                     self.request_phase = "cancelled"
+                if self.simulation and self.simulation.phase == "running":
+                    self.simulation.phase = "cancelled"
+                    for row in self.simulation.rows:
+                        if row["result"] is None:
+                            row["phase"], row["result"] = "closed", "cancelled"
                 self.owner = None
             self.changed()
 

@@ -48,6 +48,21 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 
 “认证成功”仅表示最近一次网关安全握手成功；每次请求仍独立建连。adapter 监听就绪不证明远端模型可用；只有本次运行已有响应发送完成时，页面才显示已有模型请求完成。
 
+## 实时连接与客户端模拟
+
+网关页面增加“实时连接监控”，每秒通过既有同源 WebSocket 刷新入站客户端连接。列表显示连接短标识、来源 IP／端口、认证身份、握手或已认证状态、持续时间、在途请求数，以及已认证载荷的接收／发送字节数；不包含提示词、输出、密钥或原始异常。来源地址不等于认证身份，多条连接可以使用同一个客户端身份。页面最多显示 200 条进行中连接并单独显示总数，最近结束记录最多 100 条，服务重启清空。结束原因区分认证失败、协议拒绝、超时、容量拒绝和服务停止；突然断开通常显示协议拒绝，不能据此断言发生攻击。此列表观察 client→gateway 入站连接，gateway→adapter 的上游会话仍通过汇总指标观察。
+
+客户端页面增加“多客户端与异常连接模拟”。先保存网关连接设置并启动网关，再选择类型、客户端数（1–32）和最长保持时间（1–60 秒），点击“开始模拟”；网关页面可同时观察这些真实 TCP 连接。模拟使用当前客户端身份和已配置网关，每条正常连接独立握手，不调用模型服务，也不模拟不同身份或并发推理。
+
+| 类型 | 行为与可观察结果 |
+| --- | --- |
+| 正常认证并保持 | 完成真实 SM2 认证，保持到指定时间后关闭；网关显示多条已认证连接 |
+| TCP 建连后不发起握手 | 只建立 TCP；网关先显示握手中，在自身握手超时后关闭。如果保持时间更短，则由客户端先关闭 |
+| 发送非法协议帧 | 发送固定非法帧，等待网关关闭；在最近结束列表观察协议拒绝 |
+| 认证后突然断开 | 完成认证后直接中断 TCP，省略认证关闭报文；在最近结束列表观察异常关闭 |
+
+页面展示每个模拟客户端的当前阶段和结果。“批次已结束”只代表所有模拟任务结束，具体结果以逐条记录为准；“网关已关闭连接”只表示收到 EOF，不单独证明拒绝原因，应对照网关记录。停止模拟、发起页面断开或 UI 退出会取消并排空本批次连接；模拟与认证测试、普通推理互斥。正常连接如遇服务停止或会话过期会提前结束。
+
 ## 配置与生命周期
 
 页面可填写本机配置文件路径，加载已有身份。只允许选择文件内已信任的目标身份；地址使用 IPv4／IPv6 字面量，端口为 1–65535。客户端选 gateway，网关选 adapter；页面不能生成身份、添加公钥、停用认证或修改信任有效期。
@@ -92,8 +107,12 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 | POST `/api/test` | 客户端网关真实认证测试，202；最终状态通过 WebSocket 或 GET state 获取 |
 | POST `/api/infer` | owner、prompt、model、retrieval_context 数组、max_output_tokens、stream；202 返回 request_id |
 | POST `/api/cancel` | `{request_id}`；校验最近请求 UUID 后取消，错误 UUID 为 409 |
+| POST `/api/simulation` | `{owner,count,duration,mode}`，客户端启动有界批次，202 返回 state；mode 为 normal／stalled_handshake／malformed_frame／abrupt_disconnect |
+| POST `/api/simulation/stop` | 客户端停止当前模拟批次，返回 state；可重复调用 |
 | GET `/api/ws` | 同源 WebSocket，只接收服务器推送，不接受客户端业务消息 |
 
 客户端 settings 为 config_path、target_id、target_host、target_port；网关额外包含 listen_host、listen_port；adapter 为 config_path、listen_host、listen_port、base_url、api_key_env。WebSocket 首条 ready 返回随机 owner、state 和脱敏 events；后续为 state、event、output、finished。output 与 finished 仅发给对应 owner，包含 request_id；finished.result 为 completed／cancelled／failed，只有 completed 表示收齐最终响应。
 
 role 错误为 404、运行中修改为 409、来源错误为 403、输入错误为 400、非 JSON 请求为 415、超过 HTTP 限额为 413。错误体仅为 `{error:固定代码}`。
+
+state 新增 `connections` 和 `simulation`：网关 connections 含 active、recent、total_active、truncated；客户端 simulation 含 phase、mode、clients，每个 client 含 client、phase、result。连接统计字节只计算已认证记录的明文载荷长度，不是 TCP 线速流量。快照仍仅发给本机控制面。
