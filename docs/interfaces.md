@@ -20,7 +20,7 @@
 
 `ModelProvider` 位于 `gateway.adapter.provider`，提供 `async complete(request) -> InferenceResponse`、`stream(request) -> AsyncGenerator[InferenceChunk, None]` 与 `async close() -> None`。流可以显式 aclose；序号从 0 连续递增，仅正常完成时返回一个最终分片。供应商实现必须返回同一请求 UUID，输出首行包含时间戳和 UUID。
 
-`create_provider(AdapterConfig, Limits)` 显式注册供应商，目前创建 `DeepSeekProvider`。新增供应商时实现该接口、注册工厂并补充配置与契约测试；目标地址及凭据只来自可信 adapter 配置。
+`create_provider(AdapterConfig, Limits)` 根据受信任配置创建 DeepSeek 或 OpenAI-compatible provider。多服务配置返回 `RoundRobinProvider`，对普通和流式调用按请求逐次轮询；一次调用只分配给一个服务，失败不自动重试。服务配置使用 `ModelServiceConfig`，最多 16 项且名称唯一。目标地址及凭据只来自可信 adapter 配置，凭据从对应环境变量读取。
 
 角色为 `client`、`gateway`、`adapter`，会话授权关系为 client→gateway 与 gateway→adapter。契约 2.0 删除旧 simulator 角色及入口；安全记录版本、业务载荷编码仍为 1。迁移见 [部署说明](deployment.md#从模拟服务迁移)。
 

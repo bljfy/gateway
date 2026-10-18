@@ -145,9 +145,9 @@ GCM nonce 不允许在同一密钥下重复。断线恢复必须建立新会话�
 
 ## 7. 业务接口与流式转发
 
-当前调用链为用户客户端→国密网关→AdapterServer→ModelProvider→真实模型 API。AdapterServer 只处理安全会话与业务记录；供应商实现处理 SDK 参数、回答解析和错误转换。DeepSeekProvider 使用 openai==3.31.0 的 AsyncOpenAI，调用 Chat Completions/SSE，默认 deepseek-flash，thinking.type=disabled。其他供应商通过接口实现和显式工厂注册接入。
+当前调用链为用户客户端→国密网关→AdapterServer→ModelProvider→真实模型 API。AdapterServer 只处理安全会话与业务记录；provider 处理 SDK 参数、回答解析和错误转换。DeepSeek 与 OpenAI-compatible 服务使用 openai==3.31.0 的 AsyncOpenAI 调用 Chat Completions/SSE，默认模型为 deepseek-flash，DeepSeek 请求关闭思考模式。adapter 可配置最多 16 个服务，按请求轮询普通及流式推理；请求失败不自动重试。服务接入与配置见 [模型连接配置](configuration.md#模型连接配置)。
 
-adapter 配置持有 provider、base_url 和 api_key_env；模型密钥只由该进程读取。HTTP 请求不自动重试，超时、取消和停机均释放调用资源。max_output_tokens 是模型 token 预算，时间戳和 UUID 由输出元数据承载并计入响应字节限额。接口与迁移详见 [公共接口](interfaces.md)及[部署说明](deployment.md#从模拟服务迁移)。
+adapter 配置持有单服务字段或 services 数组；模型密钥只由该进程读取。每个 HTTP 请求不自动重试，超时、取消和停机均释放调用资源。max_output_tokens 是模型 token 预算，时间戳和 UUID 由输出元数据承载并计入响应字节限额。接口与配置详见 [公共接口](interfaces.md)及[模型连接配置](configuration.md#模型连接配置)。
 
 
 客户端由业务调用层与安全传输层组成。业务调用层保持原型上层推理接口，负责提示词、检索片段等请求参数和输出展示；安全传输层在内部完成认证、加密、序列管理与响应验证。adapter 采用相同分层，只有经过验证的业务数据才能进入模型推理逻辑。

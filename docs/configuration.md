@@ -65,7 +65,7 @@ max_plaintext_bytes_per_direction = 1073741824
 | `host`、`port` | 本地监听地址；演示固定回环，端口范围 1–65535 |
 | `target` | 客户端指向信任表中的网关身份 |
 | `audit_file` | 网关本地审计 JSONL 文件，默认 `audit.jsonl` |
-| `provider`、`base_url`、`api_key_env` | adapter 的供应商、API 地址与凭据环境变量名，详见模型连接配置 |
+| `provider`、`base_url`、`api_key_env` | adapter 单服务配置；也可用 `services` 配置多服务，详见模型连接配置 |
 | `trust` | 最多 64 个预置公钥身份，见下文 |
 
 每条信任记录包含 `peer_id`、`role`、`signing_public_key`、`encryption_public_key`（十六进制公钥）；出站目标另需 `host`、`port`。`enabled` 默认为 true，`expires_at` 为 Unix 秒时间戳，演示默认 4102444800；部署时设置实际有效期。客户端仅信任网关，adapter 仅信任网关，网关信任客户端与固定 adapter。业务请求不能修改信任表。口令文件与加密私钥同目录仅用于本地原型，生产密钥托管另行配置。
@@ -130,11 +130,32 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 
 WebUI 的非敏感端点设置单独保存为身份 JSON 同目录下的 `<名称>.webui.json`，不覆盖原身份、公钥和信任记录。加载、覆盖范围、IP／端口校验及停机后重载规则见 [WebUI 配置](webui.md#配置与生命周期)。
 
-adapter.json 新增顶层 provider、base_url、api_key_env，默认分别为 deepseek、https://api.deepseek.com、DEEPSEEK_API_KEY。其他角色不接受这些字段。未知 provider、非法 URL 或环境变量名拒绝加载；仅 adapter 创建 provider 时读取凭据，缺失或空值拒绝启动。
+adapter.json 可使用旧版顶层 `provider`、`base_url`、`api_key_env` 单服务配置，默认值为 `deepseek`、`https://api.deepseek.com`、`DEEPSEEK_API_KEY`。也可改用 `services` 数组配置 1–16 个服务，二者不能同时出现。数组每项必须提供唯一 `name`、`provider`、`base_url` 和 `api_key_env`。其他角色不接受这些字段。未知 provider、非法 URL、重复名称或环境变量名拒绝加载；adapter 启动时逐一校验所有 API Key，任何凭据缺失或为空都会阻止启动。
+
+```json
+{
+  "services": [
+    {
+      "name": "deepseek-primary",
+      "provider": "deepseek",
+      "base_url": "https://api.deepseek.com",
+      "api_key_env": "DEEPSEEK_API_KEY"
+    },
+    {
+      "name": "compatible-secondary",
+      "provider": "openai-compatible",
+      "base_url": "https://models.example/v1",
+      "api_key_env": "SECONDARY_MODEL_API_KEY"
+    }
+  ]
+}
+```
+
+两种 provider 都通过 OpenAI Chat Completions 和 SSE 接口调用。DeepSeek 请求会关闭思考模式；`openai-compatible` 不发送 DeepSeek 专用参数。轮询器按普通请求或流式请求逐次选择下一个服务，各服务权重相同。一个请求固定使用单个服务；失败向客户端返回，不自动重试到其他服务。所有服务须接受请求中的相同模型名。变更配置后重启 adapter 生效。WebUI 的 `services_json` 字段保存同格式的数组；留空时使用上方单服务字段。
 
 CLI 的 adapter、demo、infer、init-demo 和 webui 在执行命令前加载当前工作目录的 `.env`，已有进程环境变量优先，变量值不做插值；原 gateway、client 命令不加载该文件。`.env` 不随 `--config` 或 `--directory` 改变查找位置。自定义 `api_key_env` 时，应在进程环境或 `.env` 中提供同名变量；直接使用 Python 接口的调用方须自行加载环境。文件格式与凭据设置见 [使用说明](usage.md#环境与凭据)。
 
-base_url 必须为 HTTPS，禁止 URL 凭据、查询和片段；仅回环 IP 可使用 HTTP 供本地测试。DEEPSEEK_BASE_URL 只影响 infer 和新生成的演示配置，已有 JSON 使用固定 base_url。SDK 使用系统证书和环境代理；失败返回固定错误。默认 deepseek-flash、关闭思考模式，max_output_tokens 为真实 token 上限。SDK 禁用重试，沿用 120 秒绝对业务截止，停机关闭 HTTP 流和客户端。
+每个 base_url 必须为 HTTPS，禁止 URL 凭据、查询和片段；仅回环 IP 可使用 HTTP 供本地测试。SDK 使用系统证书和环境代理；失败返回固定错误。默认模型为 deepseek-flash，max_output_tokens 为真实 token 上限。SDK 禁用重试，沿用 120 秒绝对业务截止，停机关闭所有 HTTP 流和客户端。
 
 ## 隐私审计与健康状态
 

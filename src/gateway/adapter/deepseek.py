@@ -28,9 +28,11 @@ def response_metadata(request: InferenceRequest) -> str:
 
 
 class DeepSeekProvider:
-    def __init__(self, config: AdapterConfig, limits: Limits) -> None:
+    def __init__(
+        self, config: AdapterConfig, limits: Limits, *, api_key: str | None = None
+    ) -> None:
         self._limits = limits
-        key = config.api_key()
+        key = config.api_key() if api_key is None else api_key
         try:
             self._client = AsyncOpenAI(
                 api_key=key,
@@ -40,6 +42,9 @@ class DeepSeekProvider:
             )
         except Exception:
             raise GatewayError("model client initialization failed") from None
+
+    def _extra_body(self) -> dict[str, dict[str, str]] | None:
+        return {"thinking": {"type": "disabled"}}
 
     @staticmethod
     def _messages(request: InferenceRequest) -> list[ChatCompletionMessageParam]:
@@ -53,12 +58,13 @@ class DeepSeekProvider:
     async def complete(self, request: InferenceRequest) -> InferenceResponse:
         try:
             async with asyncio.timeout(self._limits.request_timeout_seconds):
+                options = self._extra_body()
                 result = await self._client.chat.completions.create(
                     model=request.model,
                     messages=self._messages(request),
                     max_tokens=request.max_output_tokens,
                     stream=False,
-                    extra_body={"thinking": {"type": "disabled"}},
+                    **({"extra_body": options} if options is not None else {}),
                 )
                 if len(result.choices) != 1:
                     raise GatewayError("invalid model response")
@@ -82,12 +88,13 @@ class DeepSeekProvider:
         deadline = asyncio.get_running_loop().time() + self._limits.request_timeout_seconds
         try:
             async with asyncio.timeout_at(deadline):
+                options = self._extra_body()
                 stream = await self._client.chat.completions.create(
                     model=request.model,
                     messages=self._messages(request),
                     max_tokens=request.max_output_tokens,
                     stream=True,
-                    extra_body={"thinking": {"type": "disabled"}},
+                    **({"extra_body": options} if options is not None else {}),
                 )
             async with stream:
                 index = 0
@@ -133,3 +140,10 @@ class DeepSeekProvider:
 
     async def close(self) -> None:
         await self._client.close()
+
+
+class OpenAICompatibleProvider(DeepSeekProvider):
+    """OpenAI-compatible endpoint without DeepSeek-specific request options."""
+
+    def _extra_body(self) -> None:
+        return None

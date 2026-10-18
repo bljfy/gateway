@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
-from gateway.adapter import AdapterConfig
+from gateway.adapter import AdapterConfig, ModelServiceConfig
 from gateway.contracts import GatewayError, PeerRole
 from gateway.runtime import Runtime, RuntimeOverrides, load_runtime, read_bounded
 
@@ -53,6 +53,7 @@ class Settings:
     target_port: int = 18443
     base_url: str = "https://api.deepseek.com"
     api_key_env: str = "DEEPSEEK_API_KEY"
+    services_json: str = "[]"
 
     @property
     def sidecar(self) -> Path:
@@ -84,11 +85,37 @@ class Settings:
                 target_address=(self.target_host, self.target_port)
                 if role is not PeerRole.ADAPTER
                 else None,
-                adapter_config=AdapterConfig(base_url=self.base_url, api_key_env=self.api_key_env)
+                adapter_config=self.adapter_config()
                 if role is PeerRole.ADAPTER
                 else None,
             ),
         )
+
+    def adapter_config(self) -> AdapterConfig:
+        try:
+            services = json.loads(self.services_json)
+            if not isinstance(services, list):
+                raise ValueError
+            configured = tuple(
+                ModelServiceConfig(
+                    text(item["name"]),
+                    text(item["provider"]),
+                    text(item["base_url"]),
+                    text(item["api_key_env"]),
+                )
+                for item in services
+                if isinstance(item, dict)
+                and set(item) == {"name", "provider", "base_url", "api_key_env"}
+            )
+            if len(configured) != len(services):
+                raise ValueError
+            return (
+                AdapterConfig(services=configured)
+                if configured
+                else AdapterConfig(base_url=self.base_url, api_key_env=self.api_key_env)
+            )
+        except (ValueError, TypeError, KeyError):
+            raise ValueError("invalid adapter configuration") from None
 
     def save(self, role: PeerRole) -> None:
         # 原子替换旁文件；异常时原设置保持完整。
@@ -106,7 +133,8 @@ class Settings:
     def parse(cls, value: object, role: PeerRole) -> "Settings":
         allowed = set(cls("").public(role))
         data = table(value, allowed)
-        if set(data) != allowed:
+        required = allowed - {"services_json"} if role is PeerRole.ADAPTER else allowed
+        if not required <= set(data):
             raise ValueError("missing setting")
         kwargs: dict[str, object] = {
             "config_path": str(Path(text(data["config_path"])).resolve()),
@@ -121,7 +149,15 @@ class Settings:
             adapter = AdapterConfig(
                 base_url=text(data["base_url"]), api_key_env=text(data["api_key_env"])
             )
-            kwargs.update(base_url=adapter.base_url, api_key_env=adapter.api_key_env)
+            raw_services_json = data.get("services_json", "[]")
+            if type(raw_services_json) is not str or len(raw_services_json) > 8192:
+                raise ValueError("invalid adapter configuration")
+            services_json = raw_services_json or "[]"
+            kwargs.update(
+                base_url=adapter.base_url,
+                api_key_env=adapter.api_key_env,
+                services_json=services_json,
+            )
         else:
             kwargs["target_id"] = text(data["target_id"], maximum=64)
         # 参数在上方逐字段校验，使用显式构造保持严格类型检查。
@@ -134,6 +170,7 @@ class Settings:
             target_port=cast(int, kwargs.get("target_port", 18443)),
             base_url=cast(str, kwargs.get("base_url", "https://api.deepseek.com")),
             api_key_env=cast(str, kwargs.get("api_key_env", "DEEPSEEK_API_KEY")),
+            services_json=cast(str, kwargs.get("services_json", "[]")),
         )
 
 
@@ -173,6 +210,18 @@ async def load_settings(path: Path, role: PeerRole) -> tuple[Settings, list[dict
             *address,
             adapter.base_url,
             adapter.api_key_env,
+            json.dumps(
+                [
+                    {
+                        "name": item.name,
+                        "provider": item.provider,
+                        "base_url": item.base_url,
+                        "api_key_env": item.api_key_env,
+                    }
+                    for item in adapter.services
+                ],
+                ensure_ascii=False,
+            ),
         )
     finally:
         await runtime.manager.close()

@@ -13,7 +13,7 @@ DEEPSEEK_API_KEY=你的DeepSeek_API_Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-adapter、demo、infer、init-demo 和 webui 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。已有 adapter JSON 仍使用自身 base_url，WebUI 可在旁文件保存地址覆盖。
+adapter、demo、infer、init-demo 和 webui 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。adapter JSON 可为多个推理服务分别指定凭据环境变量名，WebUI 可编辑服务列表并将设置保存到旁文件。
 
 也可以在运行 adapter、demo 或 infer 的终端设置模型凭据：
 
@@ -105,7 +105,7 @@ $metadata = $parts[0] | ConvertFrom-Json
 .\.venv\Scripts\guomi-gateway.exe infer --prompt "概括资料" --context "片段A" --context "片段B" --stream
 ```
 
-infer 直接调用 provider，使用 HTTPS，不经过网关。`--context` 可重复提供检索片段，按原顺序作为参考资料 user 消息，再发送提示词。地址默认 `https://api.deepseek.com`；infer 及新建演示配置可通过 `DEEPSEEK_BASE_URL` 指定地址。已有 adapter JSON 的 `base_url` 优先固定其运行地址。
+infer 直接调用 provider，使用 HTTPS，不经过网关。`--context` 可重复提供检索片段，按原顺序作为参考资料 user 消息，再发送提示词。默认调用 DeepSeek；infer 可通过 `DEEPSEEK_BASE_URL` 指定地址。adapter 可在 `adapter.json` 的 `services` 数组中配置最多 16 个 DeepSeek 或 OpenAI-compatible Chat Completions 服务，按请求轮询，字段及示例见[模型连接配置](configuration.md#模型连接配置)。旧版 `provider`、`base_url`、`api_key_env` 配置继续作为单服务模式使用。所有配置服务必须接受请求指定的模型名；单次请求失败不会自动切换服务。
 
 ## 业务层编程接口
 

@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import TextIO, cast
 from uuid import uuid4
 
-from gateway.adapter import AdapterConfig, AdapterServer, ModelProvider, create_provider
+from gateway.adapter import (
+    AdapterConfig,
+    AdapterServer,
+    ModelProvider,
+    ModelServiceConfig,
+    create_provider,
+)
 from gateway.adapter.server import AdapterMetrics
 from gateway.audit import PrivacyAudit
 from gateway.client import InferenceClient
@@ -134,19 +140,43 @@ def load_runtime(
                 "provider",
                 "base_url",
                 "api_key_env",
+                "services",
             },
         )
         if _text(data.get("role")) != role.value:
             raise ValueError("wrong runtime role")
         adapter_config = None
-        provider_fields = {"provider", "base_url", "api_key_env"}
+        provider_fields = {"provider", "base_url", "api_key_env", "services"}
         if role is PeerRole.ADAPTER:
             defaults = AdapterConfig()
-            adapter_config = AdapterConfig(
-                _text(data.get("provider", defaults.provider)),
-                _text(data.get("base_url", defaults.base_url)),
-                _text(data.get("api_key_env", defaults.api_key_env)),
-            )
+            if "services" in data:
+                if (provider_fields - {"services"}) & data.keys():
+                    raise ValueError("mixed model service configuration")
+                raw_services = data["services"]
+                if not isinstance(raw_services, list) or not 1 <= len(raw_services) <= 16:
+                    raise ValueError("bounded model services required")
+                services = []
+                for raw_service in raw_services:
+                    service = _table(
+                        raw_service, {"name", "provider", "base_url", "api_key_env"}
+                    )
+                    if set(service) != {"name", "provider", "base_url", "api_key_env"}:
+                        raise ValueError("complete model service required")
+                    services.append(
+                        ModelServiceConfig(
+                            _text(service["name"]),
+                            _text(service["provider"]),
+                            _text(service["base_url"]),
+                            _text(service["api_key_env"]),
+                        )
+                    )
+                adapter_config = AdapterConfig(services=tuple(services))
+            else:
+                adapter_config = AdapterConfig(
+                    _text(data.get("provider", defaults.provider)),
+                    _text(data.get("base_url", defaults.base_url)),
+                    _text(data.get("api_key_env", defaults.api_key_env)),
+                )
         elif provider_fields & data.keys():
             raise ValueError("provider configuration requires adapter role")
         config = load_config(base / _text(data.get("gateway_config")))

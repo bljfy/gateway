@@ -7,12 +7,13 @@ flowchart LR
     U[用户客户端] <-->|国密安全会话 A| G[国密网关]
     G <-->|国密安全会话 B| A[AdapterServer]
     A --> P[ModelProvider 接口]
-    P --> D[DeepSeekProvider]
-    D <-->|HTTPS / Chat Completions / SSE| M[DeepSeek 模型服务]
+    P --> D[轮询服务池]
+    D -->|HTTPS / Chat Completions / SSE| M1[DeepSeek 服务]
+    D -->|HTTPS / Chat Completions / SSE| M2[OpenAI-compatible 服务]
     G --> L[隐私审计与回环指标]
 ```
 
-adapter 负责已认证请求的业务编解码、模型接口转换、响应分片和取消清理；网关负责身份认证、安全转发、资源限额与审计。供应商专用逻辑由 provider 实现。本次提供 DeepSeek，后续供应商通过实现 `ModelProvider` 并注册工厂接入。
+adapter 负责已认证请求的业务编解码、模型接口转换、响应分片和取消清理；网关负责身份认证、安全转发、资源限额与审计。adapter 可配置最多 16 个 DeepSeek 或 OpenAI-compatible 服务，并按请求轮询分配。单服务配置仍兼容；各服务需提供相同的请求模型名。
 
 ## 快速开始
 
@@ -37,7 +38,7 @@ Linux 启动前设置 [原生库加载路径](docs/protocol.md#原生环境)。�
 
 默认模型为 `deepseek-flash`，关闭思考模式。`--model` 可指定模型，`--max-output-tokens` 为真实输出 token 上限，默认 512。响应以 UTC 时间戳和请求 UUID 的 JSON 行开头，随后为模型回答。`--quiet` 放在子命令前可隐藏过程日志。
 
-也可在命令执行目录创建 `.env`，填写 `DEEPSEEK_API_KEY` 和可选的 `DEEPSEEK_BASE_URL`，格式见 [环境与凭据](docs/usage.md#环境与凭据)。adapter、demo、infer、init-demo 和 webui 自动加载该文件，已有进程环境变量优先；已有 adapter 配置使用 JSON 中的 `base_url`，WebUI 可保存端点覆盖。
+也可在命令执行目录创建 `.env`，填写服务配置所引用的 API Key 环境变量，格式见 [环境与凭据](docs/usage.md#环境与凭据)。adapter、demo、infer、init-demo 和 webui 自动加载该文件，已有进程环境变量优先；服务地址和凭据变量名保存在 adapter JSON 中，WebUI 可编辑多服务轮询配置。
 
 `demo` 首次生成本地身份和配置，启动 adapter 与网关，发送请求后关闭服务；再次运行复用配置。已有旧配置先按 [迁移说明](docs/deployment.md#从模拟服务迁移) 更新。
 
@@ -81,13 +82,13 @@ sequenceDiagram
     participant C as 用户客户端
     participant G as 国密网关
     participant A as AdapterServer
-    participant P as DeepSeekProvider
-    participant M as DeepSeek API
+    participant P as RoundRobinProvider
+    participant M as Model API
     C->>G: 独立 SM2 会话 A，保护推理请求
     G->>A: 独立 SM2 会话 B，重新加密转发
     A->>A: 解码、校验请求 UUID 和限额
     A->>P: complete / stream
-    P->>M: HTTPS Chat Completions，stream 可选
+    P->>M: 按请求轮询 HTTPS Chat Completions，stream 可选
     M-->>P: 回答 / SSE 内容增量
     P-->>A: InferenceResponse / InferenceChunk
     A-->>G: SM4-GCM 保护响应分片
@@ -102,7 +103,7 @@ sequenceDiagram
 - [题目要求与项目实现说明](docs/requirements_solution.md)：五项要求的实现机制、源码、测试证据及性能对照。
 - [实现方案](docs/implementation_plan.md)：架构、安全边界、开发职责与验收。
 - [公共接口](docs/interfaces.md)：契约 2.0、adapter 和 provider 扩展接口。
-- [配置说明](docs/configuration.md)：信任、资源限额和模型连接配置。
+- [配置说明](docs/configuration.md)：信任、资源限额和多模型服务配置。
 - [使用说明](docs/usage.md)：演示、独立运行及编程接口。
 - [三角色 WebUI](docs/webui.md)：页面操作、局域网部署、安全边界与本地控制接口。
 - [部署与迁移](docs/deployment.md)：旧角色配置迁移、凭据和回滚。

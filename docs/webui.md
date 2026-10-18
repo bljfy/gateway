@@ -97,6 +97,8 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 
 服务运行或客户端操作期间禁止加载／保存配置。停止服务后允许修改；每次启动、连接测试与推理重新加载原身份配置并应用旁文件覆盖，创建新的运行对象。外部修改信任文件会在下一次创建运行对象时生效。`.env` 只在 WebUI 命令启动时读取当前目录；修改凭据需重新启动 WebUI 进程，页面停止／启动业务服务不会重新读取 `.env`。
 
+adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compatible 服务；每项填写唯一名称、地址和凭据环境变量名，最多 16 项。请求按相同权重轮询到单个服务，故障不会触发自动重试。API Key 只在 adapter 进程启动时读取。单服务 `base_url` 与 `api_key_env` 设置继续可用；服务数组留空时使用它们。
+
 客户端 UI 同时仅允许一个操作，每次请求拥有独立安全会话和 UUID。停止生成、关闭页面、WebSocket 断开、超时或截断均回收请求及会话，局部输出显示未完成。业务输出只发送给发起请求的页面，其他页面只收到状态与脱敏事件。网关／adapter 页面关闭不停止业务服务。页面按钮重复启停保持幂等；退出 WebUI 进程时关闭其拥有的业务服务、会话、provider 和审计任务。强制终止进程不保证完成审计排空，应先通过页面停止服务，再正常退出。
 
 状态推送每秒一次。事件缓冲最多 128 条，每进程最多 8 个 WebSocket，每连接消息队列最多 32 项；普通响应分为最多 16384 字符的消息，流式消息受原记录限额限制。输出使用有界队列背压，入队／发送超过 5 秒则终止或关闭连接；状态和事件推送允许丢弃，下一快照恢复数值状态。计数在每次业务服务启动时重置；网关快照沿用原指标，重放计数仍是预留接线，不能把 0 当成未发生攻击的证明。
@@ -139,7 +141,7 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 | POST `/api/manual/action` | `{owner,command}`，对发起页面拥有的手动连接执行操作；返回 state |
 | GET `/api/ws` | 同源 WebSocket，只接收服务器推送，不接受客户端业务消息 |
 
-客户端 settings 为 config_path、target_id、target_host、target_port；网关额外包含 listen_host、listen_port；adapter 为 config_path、listen_host、listen_port、base_url、api_key_env。WebSocket 首条 ready 返回随机 owner、state 和脱敏 events；后续为 state、event、output、finished。output 与 finished 仅发给对应 owner，包含 request_id；finished.result 为 completed／cancelled／failed，只有 completed 表示收齐最终响应。
+客户端 settings 为 config_path、target_id、target_host、target_port；网关额外包含 listen_host、listen_port；adapter 为 config_path、listen_host、listen_port、base_url、api_key_env、services_json。WebSocket 首条 ready 返回随机 owner、state 和脱敏 events；后续为 state、event、output、finished。output 与 finished 仅发给对应 owner，包含 request_id；finished.result 为 completed／cancelled／failed，只有 completed 表示收齐最终响应。
 
 role 错误为 404、运行中修改为 409、来源错误为 403、输入错误为 400、非 JSON 请求为 415、超过 HTTP 限额为 413。错误体仅为 `{error:固定代码}`。
 

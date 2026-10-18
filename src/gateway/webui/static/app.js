@@ -42,7 +42,7 @@ function configured() {
 function controls() {
   const running = ["starting","running","stopping"].includes(state.phase);
   const locked = running || state.busy || actionBusy;
-  document.querySelectorAll(".config-card input,.config-card select").forEach(el => {el.disabled = !!locked;});
+  document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => {el.disabled = !!locked;});
   $("load").disabled = !!locked;
   $("save").disabled = !!locked || !state.config_loaded;
   $("test").disabled = !!locked || !state.config_loaded;
@@ -205,7 +205,7 @@ $("add-context").onclick = () => {
 };
 $("copy").onclick = () => action(async () => {await navigator.clipboard.writeText(answer?.text || ""); notice("结果已复制。");});
 $("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true); resultStatus("idle");};
-document.querySelectorAll(".config-card input,.config-card select").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
+document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close();});
 ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
