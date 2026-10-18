@@ -63,9 +63,35 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 
 页面展示每个模拟客户端的当前阶段和结果。“批次已结束”只代表所有模拟任务结束，具体结果以逐条记录为准；“网关已关闭连接”只表示收到 EOF，不单独证明拒绝原因，应对照网关记录。停止模拟、发起页面断开或 UI 退出会取消并排空本批次连接；模拟与认证测试、普通推理互斥。正常连接如遇服务停止或会话过期会提前结束。
 
+## 手动协议与密钥实验
+
+客户端的“手动协议与密钥实验”支持在一条真实连接上分步操作：先建连，再修改参数和发送记录，最后在网关连接列表查看结果。实验复用当前配置的网关端点；安全握手通过本机临时 TCP 中继观察原始帧和注入故障，中继只在本次实验运行期间监听回环地址。页面显示的是网关实际看到的客户端源 IP／端口，可与网关列表关联。
+
+### 握手和密钥
+
+“真实 SM2 安全握手”可使用当前身份，也可填写替代的客户端签名私钥、网关签名公钥和网关加密公钥。私钥输入为 32 字节十六进制，公钥为 `04` 开头的 65 字节未压缩点；留空使用原值。输入仅作用于本次新建的运行对象，提交后页面清空密钥输入框，快照和操作日志不返回密钥。握手故障下拉框可自动生成替代密钥，也可篡改 ClientHello 挑战、ServerHello／ClientKey 签名、双方 Finished 校验值。密钥故障选项优先于同一字段的手动密钥输入。声明身份、密钥版本和“信任已过期”选项分别验证未知身份、版本不匹配和客户端本地信任过期拒绝；它们不修改文件或网关的信任表。
+
+“只建立 TCP”不自动握手，可手动发送原始帧或等待网关握手超时。安全连接建立后，可手动输入 16 字节 SM4 替代发送密钥，点击“应用替代密钥”，再发送记录观察认证失败；“恢复协商密钥”恢复后续发送使用的原协商值。替代密钥不影响客户端接收方向的验证，也不回写长期身份文件。
+
+### 记录、重放和反射
+
+记录编辑区支持记录类型、十进制 64 位序号、会话 ID、方向、请求 UUID、分片号、载荷及 nonce；序号、会话 ID 和 nonce 留空时使用当前会话值。心跳正常载荷为空；REQUEST 始终发送未结束分片，可测试分片乱序、请求超时和取消，不进入模型调用。其他记录类型可用于验证控制字段和不允许的消息类型。
+
+“加密后篡改再发送”在认证加密完成后按偏移和 XOR 掩码翻转字节。偏移从记录头第一个字节算起，不含四字节长度前缀：版本 0、类型 1、会话 ID 2–17、方向 18、序号 19–26、请求 UUID 27–42、分片号 43–46、结束位 47、密文长度 48–51；其后为密文，最后 16 字节为标签。偏移留空时翻转最后一个标签字节。测试密文篡改时选择 REQUEST 并填写合成载荷，再把偏移设为 52。
+
+“原样重放本连接上一帧”发送此前已发送记录的原始字节；“重放上次连接捕获帧”在新连接上发送前一实验保留的记录，验证跨会话拒绝。“原样反射网关记录”发送此前实际收到的网关保护记录（通常是 READY），不重新加密。测试旧 ClientKey 重放时，先建立一次正常安全连接并结束，再选“重放上次连接的 ClientKey”重新建立连接。所有捕获帧仅保留于本机内存，页面仅显示长度，不显示密文或密钥。
+
+原始帧区输入帧内容的十六进制，发送时自动添加四字节长度前缀；例如 `ff` 用于验证非法握手帧。“突然断开 TCP”省略认证关闭流程。“结束实验”、页面断开、时限到达和 UI 退出均清理所属连接、中继及任务。每次实验最多 60 秒、64 次手动操作，载荷最多 4096 UTF-8 字节、原始帧最多 8192 字节；与推理、批量连接模拟及配置修改互斥。
+
+### 判读结果
+
+客户端的“已发送”只表示写入网络，不能作为网关拒绝或接受的证明。身份和密钥错误可能在客户端本地先被拒绝，网关可能只观察到断开；信任过期可在建连前被客户端拒绝。对照网关连接记录、认证失败／协议拒绝原因及计数判读。实验只覆盖页面列出的故障注入，不等同于运行完整安全测试套件。
+
+例如，建立正常连接并发送空心跳后，改填一个 SM4 发送密钥并发送下一条心跳，可观察网关认证失败；重新建立连接、发送一条正常空心跳再点击原样重放，可观察序号重放被拒绝。加密操作仍调用既有真实 GmSSL，正常推理及协议实现不提供跳过校验的开关。
+
 ## 配置与生命周期
 
-页面可填写本机配置文件路径，加载已有身份。只允许选择文件内已信任的目标身份；地址使用 IPv4／IPv6 字面量，端口为 1–65535。客户端选 gateway，网关选 adapter；页面不能生成身份、添加公钥、停用认证或修改信任有效期。
+页面可填写本机配置文件路径，加载已有身份。只允许选择文件内已信任的目标身份；地址使用 IPv4／IPv6 字面量，端口为 1–65535。客户端选 gateway，网关选 adapter；常规配置不提供身份生成、公钥添加或信任策略修改，手动实验的替代参数只存在于独立运行对象。
 
 保存设置前校验角色、原生库、身份和字段，写入身份 JSON 同目录的 `<文件名去扩展名>.webui.json`，原子替换。旁文件仅保存身份配置路径及本角色非敏感端点参数，加入 Git 忽略规则；原 JSON、TOML、密钥与口令文件保持原样。重新打开 UI 或加载同一配置时恢复旁文件。旁文件损坏时拒绝加载；人工移走损坏旁文件后可恢复原配置。模型 URL 沿用 AdapterConfig：远端必须 HTTPS，无 URL 凭据、查询或片段；回环 HTTP 仅用于测试。
 
@@ -109,6 +135,8 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 | POST `/api/cancel` | `{request_id}`；校验最近请求 UUID 后取消，错误 UUID 为 409 |
 | POST `/api/simulation` | `{owner,count,duration,mode}`，客户端启动有界批次，202 返回 state；mode 为 normal／stalled_handshake／malformed_frame／abrupt_disconnect |
 | POST `/api/simulation/stop` | 客户端停止当前模拟批次，返回 state；可重复调用 |
+| POST `/api/manual/open` | `{owner,options}`，客户端创建手动实验；202 返回 state |
+| POST `/api/manual/action` | `{owner,command}`，对发起页面拥有的手动连接执行操作；返回 state |
 | GET `/api/ws` | 同源 WebSocket，只接收服务器推送，不接受客户端业务消息 |
 
 客户端 settings 为 config_path、target_id、target_host、target_port；网关额外包含 listen_host、listen_port；adapter 为 config_path、listen_host、listen_port、base_url、api_key_env。WebSocket 首条 ready 返回随机 owner、state 和脱敏 events；后续为 state、event、output、finished。output 与 finished 仅发给对应 owner，包含 request_id；finished.result 为 completed／cancelled／failed，只有 completed 表示收齐最终响应。
@@ -116,3 +144,5 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 role 错误为 404、运行中修改为 409、来源错误为 403、输入错误为 400、非 JSON 请求为 415、超过 HTTP 限额为 413。错误体仅为 `{error:固定代码}`。
 
 state 新增 `connections` 和 `simulation`：网关 connections 含 active、recent、total_active、truncated；客户端 simulation 含 phase、mode、clients，每个 client 含 client、phase、result。连接统计字节只计算已认证记录的明文载荷长度，不是 TCP 线速流量。快照仍仅发给本机控制面。
+
+手动实验 options 支持 mode（secure／raw）、duration、fault、identity、key_version、expired_trust，以及 signing_private／gateway_signing_public／gateway_encryption_public 替代值。command.action 为 key、restore_key、send、tamper、replay、cross_session、reflect、raw、abort、close；key 使用 key 字段，raw 使用 raw 字段，send／tamper 支持 sequence（十进制字符串）、session_id、direction、record_type、request_id、chunk_index、payload、nonce，tamper 额外支持 offset 和 xor。故障枚举与界面一致。不存在的连接、错误 owner 或已结束连接返回 409，参数错误为 400；接口不接受额外目标地址。state.manual 仅包含阶段、结果、源地址、下一序号、捕获长度、替代密钥状态和脱敏操作记录。

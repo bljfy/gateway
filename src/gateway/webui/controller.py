@@ -14,6 +14,7 @@ from gateway.codec import encode_request
 from gateway.contracts import InferenceRequest, PeerRole, SecureSession
 from gateway.logging import EventLogger, PrivacyFormatter, set_log_level
 from gateway.runtime import Runtime, RuntimeStatus, run_server
+from gateway.webui.manual import ManualLab, OpenOptions
 from gateway.webui.settings import Settings, inspect_settings, load_settings, table, text
 from gateway.webui.simulation import MAX_CLIENTS, MAX_DURATION, MODES, Simulation
 
@@ -67,6 +68,7 @@ class Controller:
         self.events: deque[dict[str, object]] = deque(maxlen=EVENT_CAPACITY)
         self.handler: EventHandler | None = None
         self.simulation: Simulation | None = None
+        self.manual: ManualLab | None = None
 
     async def initialize(self) -> None:
         self.handler = EventHandler(self)
@@ -94,6 +96,7 @@ class Controller:
             if self.role is PeerRole.GATEWAY
             else None,
             "simulation": self.simulation.snapshot() if self.simulation else None,
+            "manual": self.manual.snapshot() if self.manual else None,
         }
 
     @property
@@ -412,6 +415,66 @@ class Controller:
                 pass
             asyncio.get_running_loop().call_soon(self.changed)
 
+    async def open_manual(self, data: object) -> None:
+        async with self.lock:
+            if self.role is not PeerRole.CLIENT:
+                raise ControlError("wrong_role", 404)
+            self.editable()
+            try:
+                values = table(data, {"owner", "options"})
+                owner = text(values.get("owner"))
+                if owner not in self.sockets:
+                    raise ControlError("socket_required", 409)
+                options = OpenOptions.parse(values.get("options"))
+                if options.fault == "client_key_replay" and not (
+                    self.manual and (self.manual.key_frame or self.manual.previous_key_frame)
+                ):
+                    raise ValueError("no previous handshake")
+            except ControlError:
+                raise
+            except Exception:
+                raise ControlError("request_invalid") from None
+            runtime = self.new_runtime()
+            previous = (self.manual.captured or self.manual.previous) if self.manual else b""
+            previous_key = (
+                (self.manual.key_frame or self.manual.previous_key_frame) if self.manual else b""
+            )
+            self.manual = ManualLab(options, self.changed, previous, previous_key)
+            self.owner, self.request_id = owner, None
+            self.operation_runtime = runtime
+            self.operation = asyncio.create_task(self.manual.run(runtime))
+            self.changed()
+
+    async def manual_action(self, data: object) -> None:
+        # 关闭路径调用 cancel，由它统一获取控制器锁。
+        try:
+            values = table(data, {"owner", "command"})
+            owner = text(values.get("owner"))
+            command = values.get("command")
+            if not isinstance(command, dict):
+                raise ValueError
+        except Exception:
+            raise ControlError("request_invalid") from None
+        if self.role is not PeerRole.CLIENT:
+            raise ControlError("wrong_role", 404)
+        if (
+            not self.manual
+            or owner != self.owner
+            or owner not in self.sockets
+            or self.manual.phase not in {"connecting", "active", "raw_connected", "closing"}
+        ):
+            raise ControlError("manual_unavailable", 409)
+        if command == {"action": "close"}:
+            await self.cancel()
+            return
+        async with self.lock:
+            if not self.busy:
+                raise ControlError("manual_unavailable", 409)
+            try:
+                await self.manual.act(command)
+            except Exception:
+                raise ControlError("request_invalid") from None
+
     async def cancel(self, request_id: str | None = None) -> None:
         async with self.lock:
             if self.role is not PeerRole.CLIENT:
@@ -431,6 +494,9 @@ class Controller:
                     for row in self.simulation.rows:
                         if row["result"] is None:
                             row["phase"], row["result"] = "closed", "cancelled"
+                if self.manual and self.manual.phase == "connecting":
+                    self.manual.phase, self.manual.result = "closed", "cancelled"
+                    self.manual.options.keys.clear()
                 self.owner = None
             self.changed()
 

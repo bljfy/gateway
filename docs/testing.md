@@ -2,6 +2,10 @@
 
 ## WebUI 验证
 
+手动实验回归位于 `test/integration/test_webui_manual.py`，通过真实 GmSSL 和本机 TCP 验证协商密钥恢复、自定义发送密钥失败、头部／密文／标签翻转、序号／会话／方向／nonce／控制字段错误、真实反射、同连接及跨会话重放、双向握手篡改、旧 ClientKey 重放、替代私钥与公钥、身份／版本／信任失效，以及输入边界、页面归属、提前取消、实验时限、页面断开和中继清理。测试使用合成材料，核对原身份文件不变、正文／密钥不进入快照，异常不触发模型调用。
+
+2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成手动实验验证：新增 39 项针对性测试通过；修复独立审查发现的清理过程重复取消竞态后，最终完整非 e2e 回归 476 项通过、5 项 Linux bootstrap 跳过、1 项外部模型用例排除，耗时 145.28 秒。Ruff check、format --check、mypy、两份前端脚本语法及既有 27 个展示场景通过。浏览器分步验证正常心跳、手动替换 SM4 发送密钥、再次发送后网关认证失败，以及两侧源地址对应；保存界面预览。清理回归在自然超时进入关闭阶段时再次取消，核对密钥缓冲区清空、中继关闭和任务排空；独立复审通过。JUnit 位于本地忽略目录 `artifacts/manual-lab-junit.xml`。本次未验证 Linux、外部模型或长负载。
+
 连接监控与模拟回归位于 `test/integration/test_webui_connections.py`，使用真实本机 GmSSL 和 TCP，不调用模型。覆盖并发连接来源和身份、网关 WebSocket 实时推送、非法帧／握手超时／认证后断开、网关恢复认证、输入与角色限制、停止批次、尚未执行即取消、页面断开及网关停止清理。`test/unit/gateway/test_relay.py` 同时核对连接记录的收发字节和正文隔离。
 
 2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成此功能回归：完整非 e2e 测试 437 项通过、5 项 Linux bootstrap 用例跳过、1 项外部模型用例排除，耗时 101.68 秒；Ruff check、format --check（src/test/scripts）、mypy（src/scripts）、前端语法和既有 27 个展示场景通过。浏览器实测五条正常认证连接逐条显示、停止后释放，以及五条非法协议帧连接被拒绝并保留近期记录。JUnit 为本地忽略目录 `artifacts/connections-junit.xml`。未运行 Linux、外部模型或长时间负载验收；独立 diff 审查未发现阻断问题。

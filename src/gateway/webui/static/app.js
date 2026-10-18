@@ -55,6 +55,7 @@ function controls() {
   $("simulation-stop").disabled = actionBusy || state.simulation?.phase !== "running";
   for (const id of ["simulation-mode", "simulation-count", "simulation-duration"]) $(id).disabled = !!locked;
   $("dirty-note").textContent = dirty ? "有未保存的连接参数，请先保存。" : "设置保存到独立旁文件，身份与信任文件保持原样。";
+  ManualUI.controls(state, actionBusy, owner);
 }
 function metric(label, value) {
   const box = document.createElement("div"); box.className = "metric";
@@ -87,6 +88,7 @@ function render(next) {
   if (currentId && state.request_id === currentId && state.request_phase !== "idle") resultStatus(state.request_phase);
   renderConnections(state.connections);
   renderSimulation(state.simulation);
+  ManualUI.render(state.manual);
   controls();
 }
 const connectionLabels = {handshaking:"握手中",active:"已认证",closed:"已关闭",authentication_failed:"认证失败",protocol_rejected:"协议拒绝",timeout:"超时",capacity:"容量拒绝",stopped:"服务停止",failed:"连接失败"};
@@ -206,4 +208,5 @@ $("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true);
 document.querySelectorAll(".config-card input,.config-card select").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close();});
+ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
 action(async () => {render(await api("state")); fill(await api("config")); connect();});

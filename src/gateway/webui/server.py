@@ -82,6 +82,7 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         content_types = {
             "index.html": "text/html",
             "app.js": "application/javascript",
+            "manual.js": "application/javascript",
             "output.js": "application/javascript",
             "markdown-it.min.js": "application/javascript",
             "style.css": "text/css",
@@ -137,6 +138,14 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             raise ControlError("wrong_role", 404)
         if controller.simulation and controller.simulation.phase == "running":
             await controller.cancel()
+        return web.json_response(controller.snapshot())
+
+    async def manual_open(request: web.Request) -> web.Response:
+        await controller.open_manual(await body(request))
+        return web.json_response(controller.snapshot(), status=202)
+
+    async def manual_action(request: web.Request) -> web.Response:
+        await controller.manual_action(await body(request))
         return web.json_response(controller.snapshot())
 
     async def websocket(request: web.Request) -> web.WebSocketResponse:
@@ -232,6 +241,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.post("/api/cancel", cancel),
             web.post("/api/simulation", simulate),
             web.post("/api/simulation/stop", stop_simulation),
+            web.post("/api/manual/open", manual_open),
+            web.post("/api/manual/action", manual_action),
             web.get("/api/ws", websocket),
         ]
     )
