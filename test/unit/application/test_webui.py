@@ -55,6 +55,45 @@ def test_settings_reject_invalid_values(change, tmp_path):
 
 
 @pytest.mark.parametrize(
+    "role,settings",
+    [
+        (
+            PeerRole.CLIENT,
+            {"target_id": "gateway", "target_host": "127.0.0.1", "target_port": 18443},
+        ),
+        (
+            PeerRole.GATEWAY,
+            {
+                "listen_host": "127.0.0.1",
+                "listen_port": 18443,
+                "target_id": "adapter",
+                "target_host": "127.0.0.1",
+                "target_port": 19443,
+            },
+        ),
+    ],
+)
+def test_settings_load_legacy_sidecar_without_adapter_services(role, settings, tmp_path):
+    legacy = {"config_path": str(tmp_path / f"{role.value}.json"), **settings}
+
+    parsed = Settings.parse(legacy, role)
+    parsed_with_previous_default = Settings.parse(legacy | {"services_json": "[]"}, role)
+
+    assert parsed.config_path == str((tmp_path / f"{role.value}.json").resolve())
+    assert parsed_with_previous_default == parsed
+    assert "services_json" not in parsed.public(role)
+
+
+@pytest.mark.parametrize("role", [PeerRole.CLIENT, PeerRole.GATEWAY])
+@pytest.mark.parametrize("services_json", [None, "[{}]"])
+def test_settings_reject_nonempty_legacy_adapter_services(role, services_json, tmp_path):
+    settings = Settings(str(tmp_path / f"{role.value}.json"), target_id="peer").public(role)
+
+    with pytest.raises(ValueError, match="invalid adapter configuration"):
+        Settings.parse(settings | {"services_json": services_json}, role)
+
+
+@pytest.mark.parametrize(
     "base_url",
     ["http://192.168.1.1", "https://u:p@example.com", "https://example.com?api_key=secret"],
 )

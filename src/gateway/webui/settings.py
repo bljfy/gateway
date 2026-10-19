@@ -71,6 +71,7 @@ class Settings:
         else:
             fields.pop("base_url")
             fields.pop("api_key_env")
+            fields.pop("services_json")
         return fields
 
     def runtime(self, role: PeerRole, *, disable_resumption: bool = False) -> Runtime:
@@ -131,10 +132,15 @@ class Settings:
     @classmethod
     def parse(cls, value: object, role: PeerRole) -> "Settings":
         allowed = set(cls("").public(role))
+        if role is not PeerRole.ADAPTER:
+            # 多模型提交曾将默认空数组写入 client/gateway 旁文件。
+            allowed.add("services_json")
         data = table(value, allowed)
-        required = allowed - {"services_json"} if role is PeerRole.ADAPTER else allowed
+        required = allowed - {"services_json"}
         if not required <= set(data):
             raise ValueError("missing setting")
+        if role is not PeerRole.ADAPTER and data.get("services_json", "[]") != "[]":
+            raise ValueError("invalid adapter configuration")
         kwargs: dict[str, object] = {
             "config_path": str(Path(text(data["config_path"])).resolve()),
         }
