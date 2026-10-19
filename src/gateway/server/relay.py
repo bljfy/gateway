@@ -25,8 +25,8 @@ from gateway.contracts import (
 )
 from gateway.logging import EventLogger
 from gateway.metrics import Metrics
-from gateway.server.pool import UpstreamPool
 from gateway.server.observation import RelayEvent
+from gateway.server.pool import UpstreamPool
 
 LOGGER = EventLogger(__name__)
 
