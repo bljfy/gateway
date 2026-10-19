@@ -3,6 +3,7 @@
 import asyncio
 import ipaddress
 from collections import Counter
+from collections.abc import Callable
 
 from gateway.audit import PrivacyAudit
 
@@ -17,6 +18,9 @@ COUNTERS = frozenset(
         "replay_rejected",
         "rotation_failure",
         "audit_failure",
+        "pool_hit",
+        "pool_wait",
+        "pool_evicted",
     }
 )
 
@@ -26,6 +30,7 @@ class Metrics:
         self._counts: Counter[str] = Counter()
         self.active_sessions = 0
         self.pending_sessions = 0
+        self.security: Callable[[], dict[str, int]] | None = None
 
     def increment(self, name: str) -> None:
         if name not in COUNTERS:
@@ -47,6 +52,14 @@ class Metrics:
             audit_rejected_total=audit.rejected if audit else 0,
             audit_write_failures_total=audit.write_failures if audit else 0,
         )
+        if self.security is not None:
+            values.update(
+                {
+                    key: value
+                    for key, value in self.security().items()
+                    if key not in {"active_sessions", "pending_sessions"}
+                }
+            )
         return values
 
 

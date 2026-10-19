@@ -82,6 +82,7 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         content_types = {
             "index.html": "text/html",
             "app.js": "application/javascript",
+            "manual.js": "application/javascript",
             "output.js": "application/javascript",
             "sessions.js": "application/javascript",
             "markdown-it.min.js": "application/javascript",
@@ -139,6 +140,34 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         values = table(await body(request), {"request_id"})
         await controller.cancel(text(values.get("request_id")))
         return web.json_response(controller.snapshot())
+
+    async def simulate(request: web.Request) -> web.Response:
+        await controller.simulate(await body(request))
+        return web.json_response(controller.snapshot(), status=202)
+
+    async def stop_simulation(_request: web.Request) -> web.Response:
+        if controller.role is not PeerRole.CLIENT:
+            raise ControlError("wrong_role", 404)
+        if controller.simulation and controller.simulation.phase == "running":
+            await controller.cancel()
+        return web.json_response(controller.snapshot())
+
+    async def manual_open(request: web.Request) -> web.Response:
+        await controller.open_manual(await body(request))
+        return web.json_response(controller.snapshot(), status=202)
+
+    async def manual_action(request: web.Request) -> web.Response:
+        await controller.manual_action(await body(request))
+        return web.json_response(controller.snapshot())
+
+    async def credentials(request: web.Request) -> web.Response:
+        peer_id = None
+        if request.method == "POST":
+            values = table(await body(request), {"peer_id"})
+            if "peer_id" in values:
+                peer_id = text(values["peer_id"], maximum=64)
+        rows = await controller.credentials(revoke=request.method == "POST", peer_id=peer_id)
+        return web.json_response({"count": len(rows), "credentials": rows})
 
     async def websocket(request: web.Request) -> web.WebSocketResponse:
         if len(sockets) >= SOCKET_CAPACITY:
@@ -233,16 +262,39 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.post("/api/test", test),
             web.post("/api/infer", infer),
             web.post("/api/cancel", cancel),
+            web.post("/api/simulation", simulate),
+            web.post("/api/simulation/stop", stop_simulation),
+            web.post("/api/manual/open", manual_open),
+            web.post("/api/manual/action", manual_action),
+            web.get("/api/session-keys", credentials),
+            web.post("/api/session-keys/revoke", credentials),
             web.get("/api/ws", websocket),
         ]
     )
     return app
 
 
-def run_webui(role: PeerRole, config: Path, port: int | None = None) -> None:
+async def serve_until_stop(app: web.Application, port: int, stop_file: Path) -> None:
+    runner = web.AppRunner(app, access_log=None)
+    try:
+        await runner.setup()
+        await web.TCPSite(runner, "127.0.0.1", port).start()
+        print(f"WebUI: http://127.0.0.1:{port}", flush=True)
+        while not stop_file.exists():
+            await asyncio.sleep(0.1)
+    finally:
+        await runner.cleanup()
+
+
+def run_webui(
+    role: PeerRole, config: Path, port: int | None = None, *, stop_file: Path | None = None
+) -> None:
     chosen = DEFAULT_PORTS[role] if port is None else port
     if type(chosen) is not int or not 1 <= chosen <= 65535:
         raise ValueError("invalid UI port")
+    if stop_file is not None:
+        asyncio.run(serve_until_stop(create_app(role, config), chosen, stop_file))
+        return
     web.run_app(
         create_app(role, config),
         host="127.0.0.1",

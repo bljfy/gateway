@@ -13,7 +13,7 @@ DEEPSEEK_API_KEY=你的DeepSeek_API_Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
 
-adapter、demo、infer、init-demo 和 webui 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。已有 adapter JSON 仍使用自身 base_url，WebUI 可在旁文件保存地址覆盖。
+adapter、demo、infer、init-demo 和 webui 启动时读取当前工作目录的 `.env`；已有进程环境变量优先，不做变量插值。`.env` 已加入 Git 忽略规则，示例文件不包含真实密钥。adapter JSON 可为多个推理服务分别指定凭据环境变量名，WebUI 可编辑服务列表并将设置保存到旁文件。
 
 也可以在运行 adapter、demo 或 infer 的终端设置模型凭据：
 
@@ -36,6 +36,8 @@ Linux 使用 `export DEEPSEEK_API_KEY='<你的 DeepSeek API Key>'`。凭据不�
 再次运行复用身份和配置；已有目录不完整时拒绝启动。`--directory`、`--manifest` 可指定位置，`--gateway-port`、`--adapter-port`、`--metrics-port` 仅在新建目录时生效。结束、失败或 Ctrl+C 时清理服务、HTTP 客户端、会话和审计。审计保留在 `.tools/demo/audit.jsonl`。
 
 ## 三程序运行
+
+Windows 可双击根目录 `start.cmd`，一次启动三角色 WebUI 以及 adapter／网关业务服务并打开页面。首次完成 bootstrap，在根目录 `.env` 填入模型凭据。详细步骤、端口选项和停止方法见 [一键启动](webui.md#一键启动)。
 
 需要浏览器操作时，使用 `guomi-gateway webui --role client|gateway|adapter`。三个角色分别拥有独立页面、配置和生命周期，操作与三机部署步骤见 [WebUI 使用说明](webui.md)。原有 CLI 命令继续可用，避免同一角色的 CLI 与 WebUI 同时占用相同业务端口。
 
@@ -103,7 +105,7 @@ $metadata = $parts[0] | ConvertFrom-Json
 .\.venv\Scripts\guomi-gateway.exe infer --prompt "概括资料" --context "片段A" --context "片段B" --stream
 ```
 
-infer 直接调用 provider，使用 HTTPS，不经过网关。`--context` 可重复提供检索片段，按原顺序作为参考资料 user 消息，再发送提示词。地址默认 `https://api.deepseek.com`；infer 及新建演示配置可通过 `DEEPSEEK_BASE_URL` 指定地址。已有 adapter JSON 的 `base_url` 优先固定其运行地址。
+infer 直接调用 provider，使用 HTTPS，不经过网关。`--context` 可重复提供检索片段，按原顺序作为参考资料 user 消息，再发送提示词。默认调用 DeepSeek；infer 可通过 `DEEPSEEK_BASE_URL` 指定地址。adapter 可在 `adapter.json` 的 `services` 数组中配置最多 16 个 DeepSeek 或 OpenAI-compatible Chat Completions 服务，按请求轮询，字段及示例见[模型连接配置](configuration.md#模型连接配置)。旧版 `provider`、`base_url`、`api_key_env` 配置继续作为单服务模式使用。所有配置服务必须接受请求指定的模型名；单次请求失败不会自动切换服务。
 
 ## 业务层编程接口
 
@@ -134,3 +136,7 @@ finally:
 ## 验证
 
 本地测试使用真实 GmSSL、注入 provider 或本地 HTTP/SSE 替身；不会访问 DeepSeek。外部模型测试标记 e2e，仅明确授权后运行。结果与限制见 [测试规范](testing.md)和[整合报告](integration_report.md)。
+
+## 会话恢复与存储运维
+
+新初始化目录默认启用加密恢复存储与网关上游连接池。顺序 client 命令即使退出后重启，也可在首次认证后的 30 分钟内轻量恢复；健康上游连接跨请求复用。恢复不延长凭据有效期，取消或失败不重试业务。现有三端须同步升级握手 v2；启用步骤、跨平台权限、维护命令和回滚方法见[会话恢复说明](session_resumption.md)。

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import subprocess
 import sys
 from collections.abc import Callable
@@ -19,12 +20,16 @@ from gateway.contracts import GatewayError, InferenceRequest, PeerRole
 from gateway.logging import console_logging, set_log_level
 from gateway.runtime import (
     Runtime,
+    load_backend,
     load_runtime,
     prepare_demo,
+    read_bounded,
     request_from_file,
     run_client,
     run_server,
 )
+from gateway.session.store import ResumptionStore
+from gateway.webui.launcher import launch
 from gateway.webui.server import run_webui
 
 DEMO_DIRECTORY = Path(".tools/demo")
@@ -80,6 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--quiet", action="store_true", help="hide console progress logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    keys = subparsers.add_parser(
+        "session-keys", help="initialize, inspect or revoke local recovery credentials"
+    )
+    keys.add_argument("action", choices=("init", "status", "revoke"))
+    keys.add_argument("--config", required=True, type=Path)
+    keys.add_argument("--peer", help="revoke one peer; omitted means all peers")
+    keys.set_defaults(func=_session_keys)
 
     infer = subparsers.add_parser("infer", help="call the model provider directly")
     infer.add_argument("--prompt", required=True, help="prompt text")
@@ -126,14 +138,67 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--role", choices=[role.value for role in PeerRole], required=True)
     ui.add_argument("--config", type=Path, help="local identity configuration")
     ui.add_argument("--port", type=_positive_int, help="loopback WebUI port")
+    ui.add_argument("--stop-file", type=Path, help="exit gracefully when this file appears")
     ui.set_defaults(func=_webui)
+    all_ui = subparsers.add_parser("webui-all", help="start all three local WebUIs and services")
+    all_ui.add_argument("--directory", type=Path, default=DEMO_DIRECTORY)
+    all_ui.add_argument("--manifest", type=Path, default=NATIVE_MANIFEST)
+    all_ui.add_argument("--client-port", type=_positive_int, default=18080)
+    all_ui.add_argument("--gateway-port", type=_positive_int, default=18081)
+    all_ui.add_argument("--adapter-port", type=_positive_int, default=18082)
+    all_ui.add_argument("--no-browser", action="store_true")
+    all_ui.add_argument("--stop-file", type=Path)
+    all_ui.set_defaults(func=_webui_all)
     return parser
+
+
+def _session_keys(args: argparse.Namespace) -> int:
+    """Offline maintenance uses the same owner lock as the running service."""
+    try:
+        data = json.loads(read_bounded(args.config, 65536))
+        base = args.config.resolve().parent
+        storage = data["secret_store"]
+        directory = base / storage["directory"]
+        master = base / storage["master_key_file"]
+        backend = load_backend(base / data["native_manifest"])
+        if args.action == "init":
+            ResumptionStore.initialize(directory, master, backend)
+            print("credential storage initialized")
+        else:
+            with ResumptionStore(directory, master, backend) as store:
+                if args.action == "status":
+                    print(json.dumps(store.status()))
+                else:
+                    store.revoke(args.peer)
+                    print("credentials revoked")
+    except (KeyError, TypeError):
+        raise GatewayError("invalid credential storage configuration") from None
+    return 0
 
 
 def _webui(args: argparse.Namespace) -> int:
     role = PeerRole(args.role)
-    run_webui(role, args.config or DEMO_DIRECTORY / f"{role.value}.json", args.port)
+    run_webui(
+        role,
+        args.config or DEMO_DIRECTORY / f"{role.value}.json",
+        args.port,
+        stop_file=args.stop_file,
+    )
     return 0
+
+
+def _webui_all(args: argparse.Namespace) -> int:
+    return launch(
+        args.directory,
+        args.manifest,
+        {
+            PeerRole.CLIENT: args.client_port,
+            PeerRole.GATEWAY: args.gateway_port,
+            PeerRole.ADAPTER: args.adapter_port,
+        },
+        open_browser=not args.no_browser,
+        stop_file=args.stop_file,
+    )
 
 
 def _request_options(parser: argparse.ArgumentParser, *, required: bool) -> None:
@@ -259,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
     func: Callable[[argparse.Namespace], int] = args.func
     with console_logging(quiet=args.quiet):
         try:
-            if args.command in {"adapter", "demo", "infer", "init-demo", "webui"}:
+            if args.command in {"adapter", "demo", "infer", "init-demo", "webui", "webui-all"}:
                 load_dotenv(Path(".env"), override=False, interpolate=False)
             return func(args)
         except KeyboardInterrupt:

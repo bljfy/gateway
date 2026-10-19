@@ -98,6 +98,12 @@ class AdapterServer:
                     responding.result()
                     responding = None
                     continue
+                # A sequential peer may send immediately after receiving the final
+                # frame, before our responder task has returned from drain().
+                if receiving.result().header.record_type is RecordType.REQUEST:
+                    await responding
+                    responding = None
+                    continue
                 control = receiving.result()
                 receiving = None
                 if (

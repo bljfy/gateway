@@ -6,16 +6,23 @@ import json
 import os
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import TextIO, cast
 from uuid import uuid4
 
-from gateway.adapter import AdapterConfig, AdapterServer, ModelProvider, create_provider
+from gateway.adapter import (
+    AdapterConfig,
+    AdapterServer,
+    ModelProvider,
+    ModelServiceConfig,
+    create_provider,
+)
 from gateway.adapter.server import AdapterMetrics
 from gateway.audit import PrivacyAudit
 from gateway.client import InferenceClient
 from gateway.config import GatewayConfig, load_config, positive
+from gateway.connections import ConnectionMonitor
 from gateway.contracts import GatewayError, InferenceRequest, PeerIdentity, PeerRole, SecureSession
 from gateway.crypto import GmSSLBackend
 from gateway.logging import EventLogger
@@ -23,6 +30,8 @@ from gateway.metrics import Metrics, start_metrics_server
 from gateway.server import GatewayServer
 from gateway.server.observation import RelayEvent
 from gateway.session import LocalIdentity, SecuritySessionManager, TrustRecord
+from gateway.session.protection import restricted
+from gateway.session.store import ResumptionStore
 
 LOGGER = EventLogger(__name__)
 
@@ -88,6 +97,7 @@ class RuntimeOverrides:
     target_id: str | None = None
     target_address: tuple[str, int] | None = None
     adapter_config: AdapterConfig | None = None
+    disable_resumption: bool = False
 
 
 @dataclass(slots=True)
@@ -98,6 +108,7 @@ class RuntimeStatus:
     adapter: AdapterMetrics = field(default_factory=AdapterMetrics)
     audit: PrivacyAudit | None = None
     authenticated_sessions: int = 0
+    connections: ConnectionMonitor = field(default_factory=ConnectionMonitor)
 
     def snapshot(self, runtime: Runtime) -> dict[str, object]:
         result: dict[str, object] = dict(runtime.manager.session_counts())
@@ -133,19 +144,42 @@ def load_runtime(
                 "provider",
                 "base_url",
                 "api_key_env",
+                "services",
+                "secret_store",
             },
         )
         if _text(data.get("role")) != role.value:
             raise ValueError("wrong runtime role")
         adapter_config = None
-        provider_fields = {"provider", "base_url", "api_key_env"}
+        provider_fields = {"provider", "base_url", "api_key_env", "services"}
         if role is PeerRole.ADAPTER:
             defaults = AdapterConfig()
-            adapter_config = AdapterConfig(
-                _text(data.get("provider", defaults.provider)),
-                _text(data.get("base_url", defaults.base_url)),
-                _text(data.get("api_key_env", defaults.api_key_env)),
-            )
+            if "services" in data:
+                if (provider_fields - {"services"}) & data.keys():
+                    raise ValueError("mixed model service configuration")
+                raw_services = data["services"]
+                if not isinstance(raw_services, list) or not 1 <= len(raw_services) <= 16:
+                    raise ValueError("bounded model services required")
+                services = []
+                for raw_service in raw_services:
+                    service = _table(raw_service, {"name", "provider", "base_url", "api_key_env"})
+                    if set(service) != {"name", "provider", "base_url", "api_key_env"}:
+                        raise ValueError("complete model service required")
+                    services.append(
+                        ModelServiceConfig(
+                            _text(service["name"]),
+                            _text(service["provider"]),
+                            _text(service["base_url"]),
+                            _text(service["api_key_env"]),
+                        )
+                    )
+                adapter_config = AdapterConfig(services=tuple(services))
+            else:
+                adapter_config = AdapterConfig(
+                    _text(data.get("provider", defaults.provider)),
+                    _text(data.get("base_url", defaults.base_url)),
+                    _text(data.get("api_key_env", defaults.api_key_env)),
+                )
         elif provider_fields & data.keys():
             raise ValueError("provider configuration requires adapter role")
         config = load_config(base / _text(data.get("gateway_config")))
@@ -241,6 +275,14 @@ def load_runtime(
         # A's wire frame maximum is fixed at 131072; reject unsupported overrides.
         if limits.max_wire_frame_bytes != 131072:
             raise ValueError("wire frame maximum is fixed")
+        store = None
+        if config.resumption_enabled and not (overrides and overrides.disable_resumption):
+            storage = _table(data.get("secret_store"), {"directory", "master_key_file"})
+            store = ResumptionStore(
+                base / _text(storage.get("directory")),
+                base / _text(storage.get("master_key_file")),
+                backend,
+            )
         manager = SecuritySessionManager(
             backend,
             local,
@@ -250,6 +292,10 @@ def load_runtime(
             max_pending=limits.max_pending,
             max_bytes=limits.max_plaintext_bytes_per_direction,
             max_inflight=limits.max_inflight_requests_per_session,
+            store=store,
+            resume_lifetime=config.resumption_lifetime_seconds,
+            request_timeout=limits.request_timeout_seconds,
+            security_context=json.dumps(asdict(limits), sort_keys=True).encode(),
         )
         return Runtime(
             manager,
@@ -309,11 +355,15 @@ def prepare_demo(
             target.chmod(0o600)
     (directory / "gateway.toml").write_text(
         f'[upstream]\npeer_id="adapter"\n[gateway]\nmetrics_port={metrics_port}\n'
-        'log_level="INFO"\n'
+        'log_level="INFO"\nresumption_enabled=true\npool_enabled=true\n'
         "[limits]\nmax_queued_bytes_per_session=2097152\n",
         encoding="utf-8",
     )
     for role in PeerRole:
+        store_dir = directory / f"{role.value}.sessions"
+        key_dir = directory / f"{role.value}.secrets"
+        restricted(key_dir, create=True, directory=True)
+        ResumptionStore.initialize(store_dir, key_dir / "master.key", backend)
         peers = {
             PeerRole.CLIENT: [PeerRole.GATEWAY],
             PeerRole.GATEWAY: [PeerRole.CLIENT, PeerRole.ADAPTER],
@@ -345,6 +395,10 @@ def prepare_demo(
             "host": "127.0.0.1",
             "port": adapter_port if role is PeerRole.ADAPTER else gateway_port,
             "audit_file": "audit.jsonl",
+            "secret_store": {
+                "directory": f"{role.value}.sessions",
+                "master_key_file": f"{role.value}.secrets/master.key",
+            },
         }
         if role is PeerRole.CLIENT:
             data["target"] = "gateway"
@@ -377,8 +431,16 @@ async def run_server(
     audit_output: TextIO | None = None
     audit = PrivacyAudit(runtime.gateway.audit_capacity, runtime.gateway.security_audit_capacity)
     status = status if status is not None else RuntimeStatus()
+    status.metrics.security = manager.session_counts
     status.audit = audit
-    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics, observer)
+    relay = GatewayServer(
+        manager,
+        runtime.gateway,
+        audit,
+        status.metrics,
+        connections=status.connections,
+        observer=observer,
+    )
     adapter: AdapterServer | None = None
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

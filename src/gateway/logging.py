@@ -38,6 +38,10 @@ LOG_EVENTS = (
             "request_forwarded",
             "response_started",
             "log_rejected",
+            "full_handshake_completed",
+            "resumed_handshake_completed",
+            "resumption_rejected",
+            "credential_store_failed",
         }
     )
 )

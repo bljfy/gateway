@@ -14,7 +14,7 @@ from gateway.contracts import (
     RecordType,
 )
 
-SUITE = b"SM2-SM4-GCM-SM3-v1"
+SUITE = b"SM2-SM4-GCM-SM3-v2"
 MAX_FRAME = 131_072
 HEADER = struct.Struct("!BB16sBQ16sIBI")
 # 网络字节序：版本、类型、会话 ID、方向、序号、请求 UUID、分片序号、结束位、密文长度。

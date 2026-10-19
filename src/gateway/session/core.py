@@ -1,12 +1,12 @@
 """Mutual SM2 authentication, directional GCM records and bounded lifecycle."""
 
 import asyncio
-import hmac
+import json
 import math
 import struct
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Protocol
 from uuid import UUID
 
@@ -28,6 +28,7 @@ from gateway.contracts import (
     SessionState,
     VerifiedRecord,
 )
+from gateway.logging import EventLogger
 from gateway.protocol import (
     SUITE,
     ZERO_REQUEST,
@@ -35,15 +36,16 @@ from gateway.protocol import (
     encode_header,
     fields,
     identity,
-    parse_identity,
     read_frame,
-    unfields,
     write_frame,
 )
+from gateway.session.handshakes import ResumeMiss, accept, initiate
+from gateway.session.store import Credential, ResumptionStore
 
 
 class SecurityBackend(CryptoBackend, Protocol):
     def sm3(self, message: bytes) -> bytes: ...
+    def public_key(self, private_key: bytes) -> bytes: ...
 
 
 DEFAULT_POLICY = SessionPolicy()
@@ -149,6 +151,13 @@ class SecuritySession:
         self._inflight: set[UUID] = set()
         self._ack = asyncio.Event()
         self._close_sent = False
+        self.resumed = False
+        self.attempted_resume = False
+        self.force_full = False
+        self.binding = b""
+        self.pending_credential: Credential | None = None
+        self.credential_expiry: int | None = None
+        self.credential_epoch = manager._credential_epoch
 
     @property
     def peer(self) -> PeerIdentity:
@@ -164,6 +173,7 @@ class SecuritySession:
         """立即撤销会话并释放登记；擦除本会话持有的可变密钥缓冲区。"""
         self._keys[:] = b"\x00" * len(self._keys)
         self._keys.clear()
+        self.pending_credential = None
         self._inflight.clear()
         self._state = SessionState.CLOSED
         self._ready_pending = False
@@ -179,10 +189,17 @@ class SecuritySession:
         if not math.isfinite(now) or now < self._started or now < self._last_activity:
             self._abort()
             raise SessionExpiredError("invalid session clock")
-        return min(
+        remaining = min(
             self._started + self._lifetime - now,
             self._last_activity + self.manager.policy.idle_timeout_seconds - now,
         )
+        if self.credential_expiry is not None:
+            wall_now = self.manager.wall_clock()
+            if not math.isfinite(wall_now):
+                self._abort()
+                raise SessionExpiredError("invalid session clock")
+            remaining = min(remaining, self.credential_expiry - wall_now)
+        return remaining
 
     def _check(self, *, ready: bool = False) -> None:
         # READY 是进入 ACTIVE 前的加密确认，只有握手内部可走此例外路径。
@@ -256,15 +273,21 @@ class SecuritySession:
             try:
                 async with asyncio.timeout(self.manager.policy.handshake_timeout_seconds):
                     if self.initiator:
-                        material, transcript = await self._initiate()
+                        material, transcript = await initiate(self)
                     else:
-                        material, transcript = await self._accept()
-                    # 72 字节材料：双向 SM4 密钥各 16 字节，nonce 前缀各 4 字节，
-                    # Finished 的 HMAC 密钥 32 字节；会话只保留前 40 字节。
+                        material, transcript = await accept(self)
+                    # 完整握手 104 字节、恢复握手 72 字节；会话只保留双向
+                    # SM4 密钥与 nonce 前缀共 40 字节，恢复秘密独立加密保存。
                     self._keys = bytearray(material[:40])
                     material[:] = b"\x00" * len(material)
                     self._started = self._last_activity = self.manager.clock()
                     self._ready_pending = True
+                    self.manager._trust(self.peer, outbound=self.initiator)
+                    if self.credential_epoch != self.manager._credential_epoch:
+                        raise AuthenticationError("credentials revoked during handshake")
+                    if not self.initiator and self.pending_credential is not None:
+                        assert self.manager.store is not None
+                        self.manager.store.put(self.pending_credential)
                     if self.initiator:
                         ready = await self._receive()
                         if (
@@ -278,135 +301,29 @@ class SecuritySession:
                         raise ProtocolError("session closed during handshake")
                     # 握手期间信任可能过期，在公开 ACTIVE 会话前再次检查。
                     self.manager._trust(self.peer, outbound=self.initiator)
+                    if self.credential_epoch != self.manager._credential_epoch:
+                        raise AuthenticationError("credentials revoked during handshake")
+                    if self.initiator and self.pending_credential is not None:
+                        assert self.manager.store is not None
+                        self.manager.store.put(self.pending_credential)
+                    self.pending_credential = None
+                    self.manager.handshakes["resumed" if self.resumed else "full"] += 1
+                    EventLogger(__name__).info(
+                        "resumed_handshake_completed"
+                        if self.resumed
+                        else "full_handshake_completed"
+                    )
                     self._ready_pending = False
                     self._state = SessionState.ACTIVE
                     self._expiry_task = asyncio.create_task(self._expire())
             except BaseException:
+                if self.attempted_resume:
+                    self.manager.handshakes["resume_rejected"] += 1
+                    EventLogger(__name__).warning("resumption_rejected")
                 material[:] = b"\x00" * len(material)
                 self._state = SessionState.FAILED
                 self._abort()
                 raise
-
-    async def _initiate(self) -> tuple[bytearray, bytes]:
-        """发起方：Hello → 验服务端签名 → 发送加密密钥 → 双向 Finished。"""
-        trust = self.manager._trust(self.peer, outbound=True)
-        nc = await self.manager._crypto(lambda: self.manager.backend.random_bytes(32))
-        ch = b"\x01" + fields(
-            b"\x01", SUITE, identity(self.manager.local.peer), identity(self.peer), nc
-        )
-        await write_frame(self.writer, ch)
-        sh = await read_frame(self.reader)
-        if sh[:1] != b"\x02":
-            raise ProtocolError("expected server hello")
-        body, signature = unfields(sh[1:], 2)
-        ns, sid, lifetime, timeout = unfields(body, 4)
-        if len(ns) != 32 or len(sid) != 16 or len(lifetime) != 4 or len(timeout) != 4:
-            raise ProtocolError("invalid server parameters")
-        seconds, hs_timeout = int.from_bytes(lifetime), int.from_bytes(timeout)
-        if not 1 <= seconds <= self.manager.policy.absolute_lifetime_seconds:
-            raise ProtocolError("unacceptable session lifetime")
-        if not 1 <= hs_timeout <= self.manager.policy.handshake_timeout_seconds:
-            raise ProtocolError("unacceptable handshake timeout")
-        # 签名覆盖客户端 Hello 摘要与服务端参数，将身份、随机数和会话参数绑定。
-        await self._verify(trust, fields(b"server-hello", await self._hash(ch), body), signature)
-        self.manager._reserve_id(sid)
-        self.session_id, self._lifetime = sid, float(seconds)
-        # 发起方随机生成密钥材料，通过受信任的 SM2 加密公钥保护后传输。
-        material = bytearray(
-            await self.manager._crypto(lambda: self.manager.backend.random_bytes(72))
-        )
-        try:
-            encrypted = await self.manager._crypto(
-                lambda: self.manager.backend.encrypt_sm2(
-                    trust.encryption_public_key, bytes(material)
-                )
-            )
-            signed = await self._sign(
-                fields(b"client-key", await self._hash(fields(ch, sh)), encrypted)
-            )
-            ck = b"\x03" + fields(encrypted, signed)
-            await write_frame(self.writer, ck)
-            # 完整握手摘要参与双向 HMAC 确认，验证双方拿到同一份密钥材料。
-            transcript = await self._hash(fields(ch, sh, ck))
-            finish_key = bytes(material[40:72])
-            sf = await read_frame(self.reader)
-            if not hmac.compare_digest(
-                sf, b"\x04" + await self._mac(finish_key, b"server-finished", transcript)
-            ):
-                raise AuthenticationError("key confirmation failed")
-            await write_frame(
-                self.writer, b"\x05" + await self._mac(finish_key, b"client-finished", transcript)
-            )
-            return material, transcript
-        except BaseException:
-            material[:] = b"\x00" * len(material)
-            raise
-
-    async def _accept(self) -> tuple[bytearray, bytes]:
-        """接收方：校验目标与信任 → 签名参数 → 验发起方签名并解密材料。"""
-        ch = await read_frame(self.reader)
-        if ch[:1] != b"\x01":
-            raise ProtocolError("expected client hello")
-        version, suite, sender, target, nc = unfields(ch[1:], 5)
-        if version != b"\x01" or suite != SUITE or len(nc) != 32:
-            raise ProtocolError("unsupported client hello")
-        remote = parse_identity(sender)
-        if parse_identity(target) != self.manager.local.peer:
-            raise AuthenticationError("wrong recipient")
-        trust = self.manager._trust(remote, outbound=False)
-        self._peer = remote
-        ns = await self.manager._crypto(lambda: self.manager.backend.random_bytes(32))
-        # 在本管理器内保留会话 ID；有限重试避免碰撞导致无界循环。
-        for _ in range(8):
-            sid = await self.manager._crypto(lambda: self.manager.backend.random_bytes(16))
-            if sid not in self.manager._ids:
-                self.manager._reserve_id(sid)
-                self.session_id = sid
-                break
-        else:
-            raise CapacityError("session identifier collisions")
-        body = fields(
-            ns,
-            sid,
-            struct.pack("!I", self.manager.policy.absolute_lifetime_seconds),
-            struct.pack("!I", self.manager.policy.handshake_timeout_seconds),
-        )
-        sh = b"\x02" + fields(
-            body, await self._sign(fields(b"server-hello", await self._hash(ch), body))
-        )
-        await write_frame(self.writer, sh)
-        ck = await read_frame(self.reader)
-        if ck[:1] != b"\x03":
-            raise ProtocolError("expected client key")
-        encrypted, signature = unfields(ck[1:], 2)
-        await self._verify(
-            trust, fields(b"client-key", await self._hash(fields(ch, sh)), encrypted), signature
-        )
-        # 先验发起方签名，再解密；网络消息不能替换本地配置中的可信公钥。
-        material = bytearray(
-            await self.manager._crypto(
-                lambda: self.manager.backend.decrypt_sm2(
-                    self.manager.local.encryption_private_key, encrypted
-                )
-            )
-        )
-        try:
-            if len(material) != 72:
-                raise AuthenticationError("invalid key material")
-            transcript = await self._hash(fields(ch, sh, ck))
-            finish_key = bytes(material[40:72])
-            await write_frame(
-                self.writer, b"\x04" + await self._mac(finish_key, b"server-finished", transcript)
-            )
-            cf = await read_frame(self.reader)
-            if not hmac.compare_digest(
-                cf, b"\x05" + await self._mac(finish_key, b"client-finished", transcript)
-            ):
-                raise AuthenticationError("key confirmation failed")
-            return material, transcript
-        except BaseException:
-            material[:] = b"\x00" * len(material)
-            raise
 
     def _direction(self, sending: bool) -> Direction:
         # 方向以握手发起方为基准，而不是固定按 client/gateway/adapter 角色划分。
@@ -603,6 +520,10 @@ class SecuritySessionManager:
         close_timeout: float = 1,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
+        store: ResumptionStore | None = None,
+        resume_lifetime: int = 1800,
+        request_timeout: int = 120,
+        security_context: bytes = b"",
     ) -> None:
         if min(max_active, max_pending, max_bytes, max_inflight, crypto_workers) < 1:
             raise ValueError("resource limits must be positive")
@@ -613,6 +534,16 @@ class SecuritySessionManager:
         if any(name != entry.peer.peer_id for name, entry in trust.items()):
             raise ValueError("trust index mismatch")
         self.backend, self.local, self.policy = backend, local, policy
+        self._public_source = local
+        self._local_public = (
+            backend.public_key(local.signing_private_key),
+            backend.public_key(local.encryption_private_key),
+        )
+        self.store = store
+        self.resume_lifetime, self.request_timeout = resume_lifetime, request_timeout
+        self.security_context = security_context
+        self.handshakes = {"full": 0, "resumed": 0, "resume_rejected": 0}
+        self._credential_epoch = 0
         self.trust = dict(trust)
         self.max_active, self.max_pending, self.max_bytes = max_active, max_pending, max_bytes
         self.max_inflight, self.close_timeout = max_inflight, close_timeout
@@ -645,7 +576,50 @@ class SecuritySessionManager:
         return {
             "active_sessions": sum(s.state is SessionState.ACTIVE for s in self._sessions),
             "pending_sessions": self._pending,
+            "full_handshakes_total": self.handshakes["full"],
+            "resumed_handshakes_total": self.handshakes["resumed"],
+            "resume_rejected_total": self.handshakes["resume_rejected"],
+            "credential_store_healthy": int(self.store is None or self.store.healthy),
         }
+
+    def binding(self, peer: PeerIdentity, *, initiator: bool) -> bytes:
+        """Bind credentials to public identities and both local security policies."""
+        trust = self._trust(peer, outbound=initiator)
+        if self.local != self._public_source:
+            self._local_public = (
+                self.backend.public_key(self.local.signing_private_key),
+                self.backend.public_key(self.local.encryption_private_key),
+            )
+            self._public_source = self.local
+        local = fields(
+            identity(self.local.peer),
+            *self._local_public,
+        )
+        remote = fields(identity(peer), trust.signing_public_key, trust.encryption_public_key)
+        policy = json.dumps(
+            dict(
+                policy=asdict(self.policy),
+                max_bytes=self.max_bytes,
+                max_inflight=self.max_inflight,
+                request_timeout=self.request_timeout,
+                resume_lifetime=self.resume_lifetime,
+                context=self.security_context.hex(),
+            ),
+            sort_keys=True,
+        ).encode()
+        return self.backend.sm3(
+            fields(SUITE, local if initiator else remote, remote if initiator else local, policy)
+        )
+
+    async def revoke(self, peer_id: str | None = None) -> None:
+        """Revoke local credentials and immediately terminate affected connections."""
+        if self.store is None:
+            raise GatewayError("credential storage disabled")
+        self.store.revoke(peer_id)
+        self._credential_epoch += 1
+        for session in tuple(self._sessions):
+            if peer_id is None or session._peer is None or session.peer.peer_id == peer_id:
+                session._abort()
 
     def _trust(self, peer: PeerIdentity, *, outbound: bool) -> TrustRecord:
         # 信任有效期使用墙上时钟；角色只允许 client→gateway→adapter 两段链路。
@@ -673,6 +647,8 @@ class SecuritySessionManager:
         # 未完成握手也占用总容量，避免大量半开连接绕过活动会话上限。
         if self._closed:
             raise ProtocolError("manager closed")
+        if self.store is not None and not self.store.healthy:
+            raise GatewayError("credential storage unhealthy")
         active = sum(
             session.state in (SessionState.ACTIVE, SessionState.DRAINING)
             for session in self._sessions
@@ -716,7 +692,7 @@ class SecuritySessionManager:
                     task.result()._abort()
             raise
 
-    async def _open(self, peer: PeerIdentity) -> SecuritySession:
+    async def _open(self, peer: PeerIdentity, *, force_full: bool = False) -> SecuritySession:
         trust = self._trust(peer, outbound=True)
         if trust.address is None:
             raise ProtocolError("trusted endpoint has no outbound address")
@@ -725,11 +701,18 @@ class SecuritySessionManager:
             async with asyncio.timeout(self.policy.handshake_timeout_seconds):
                 reader, writer = await asyncio.open_connection(*trust.address)
                 session = SecuritySession(self, reader, writer, peer)
+                session.force_full = force_full
                 self._sessions.add(session)
                 await session.handshake()
             if self._closed:
                 raise ProtocolError("manager closed during handshake")
             return session
+        except ResumeMiss:
+            if session is not None:
+                session._abort()
+            if force_full:
+                raise
+            return await self._open(peer, force_full=True)
         except BaseException:
             if session is not None:
                 session._abort()
@@ -805,3 +788,5 @@ class SecuritySessionManager:
                 # 关闭确认仍需要密码运算，因此在会话清理完成后才停止接收原生工作。
                 self._crypto_stopped = True
                 await _await_completion(asyncio.gather(*self._native_tasks, return_exceptions=True))
+                if self.store is not None:
+                    self.store.close()

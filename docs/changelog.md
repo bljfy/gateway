@@ -31,7 +31,19 @@
 
 ### 新增
 
+- adapter 可配置多个 DeepSeek 与 OpenAI-compatible Chat Completions 服务，并按请求轮询普通及流式推理；旧单服务配置继续可用，故障不会自动重试。
+
+- 增加测试结果总览页面，展示 2026-10-18 非 e2e 回归快照的分类通过数、耗时和真实测试样例。
+
+- 客户端增加分步手动协议实验：临时替换 SM2／SM4 密钥、编辑记录字段和 nonce、按字节篡改、同连接及跨会话重放、真实网关记录反射、双向握手篡改和旧 ClientKey 重放；实验隔离身份文件，记录实际观察结果并支持取消清理。
+
+- 网关 WebUI 增加逐连接实时监控和最近结束记录；客户端可模拟 1–32 条正常认证连接、握手停滞、非法协议帧和认证后突然断开，支持批次停止及页面断开清理。
+
+- 整合已有三角色 WebUI，增加 Windows `start.cmd`／`scripts/start.ps1` 和 `webui-all` 一键入口，自动初始化身份、依次启动 adapter 与网关业务服务并打开三个页面；启动失败和正常退出时清理本次创建的进程，单角色 WebUI 支持停止文件。
+
 - 三角色独立中文 WebUI：`webui --role client|gateway|adapter`，回环 HTTP 与同源 WebSocket，手动加载现有身份和保存非敏感端点旁文件；客户端支持检索片段、普通／流式推理、认证测试及取消，网关和 adapter 支持启停、数值指标与脱敏事件。页面断开取消对应推理，服务重启创建新的安全运行对象；角色间国密链路与现有 CLI 保持兼容。新增固定 aiohttp 依赖、本地安全与生命周期回归、局域网三机使用说明。
+
+- 增加题目要求与项目实现说明，逐项关联认证、报文保护、会话和密钥生命周期、测试输出及 TLS 性能对照，区分历史性能证据与当前 adapter 版本待验收项。
 
 - 增加 `.env.example` 和 CLI 的 `.env` 自动加载，已有进程环境变量优先；本地凭据文件加入 Git 忽略规则。
 
@@ -56,6 +68,7 @@
 - 三条并行开发线路、最终 merge 验收、开发指南与项目 README。
 - A 线真实 GmSSL 后端、规范二进制协议、双向认证与密钥确认、安全记录、会话轮换和异常清理；增加真实后端 TCP 安全测试、JSON 报告与协议说明。
 - 固定 GmSSL 3.1.1 源码校验与本地原生构建清单，锁定官方 Python 绑定 2.2.2，并接入 bootstrap 与 CI。原生构建需要 CMake 和 C 编译器。
+- 增加 Windows DPAPI／Linux 独立主密钥保护的本地恢复存储、30 分钟恢复凭据、HMAC-SM3 恢复握手与网关独占连接池；增加状态及撤销 CLI/API、重启恢复与异常回归。握手升级至 v2、套件升级至 `SM2-SM4-GCM-SM3-v2`，三端须同步升级，迁移与安全边界见[会话恢复说明](session_resumption.md)。
 - 业务载荷的确定性版本化编码 `src/gateway/codec.py`，覆盖 `InferenceRequest`/`InferenceResponse` 与流式请求标志，严格拒绝截断、尾随字节与非法 UTF-8。
 - 记录级分片与组装 `src/gateway/framing.py`，客户端与模拟服务端共享逻辑消息的记录边界校验。
 - 客户端业务层 `src/gateway/client/`（`InferenceClient`），实现 `complete` 与 `stream`，校验响应身份与分片顺序。

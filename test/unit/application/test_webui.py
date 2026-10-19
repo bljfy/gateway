@@ -17,7 +17,7 @@ from gateway.webui.settings import Settings
 @pytest.mark.parametrize("role,port", [("client", 18080), ("gateway", 18081), ("adapter", 18082)])
 def test_webui_cli_role_defaults(role, port, monkeypatch):
     calls = []
-    monkeypatch.setattr("gateway.cli.run_webui", lambda *args: calls.append(args))
+    monkeypatch.setattr("gateway.cli.run_webui", lambda *args, **kwargs: calls.append(args))
     assert main(["webui", "--role", role]) == 0
     assert calls[0][0] == PeerRole(role)
     assert calls[0][1].as_posix() == f".tools/demo/{role}.json"
@@ -29,7 +29,7 @@ def test_webui_cli_role_defaults(role, port, monkeypatch):
 
 def test_webui_cli_explicit_config_port(monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr("gateway.cli.run_webui", lambda *args: calls.append(args))
+    monkeypatch.setattr("gateway.cli.run_webui", lambda *args, **kwargs: calls.append(args))
     path = tmp_path / "identity.json"
     assert main(["webui", "--role", "client", "--config", str(path), "--port", "18090"]) == 0
     assert calls[0][1:] == (path, 18090)

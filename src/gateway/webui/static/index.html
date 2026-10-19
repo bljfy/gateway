@@ -5,7 +5,7 @@
   <title>国密推理 · 本地控制台</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/markdown-it.min.js" defer></script>
-  <script src="/static/output.js" defer></script><script src="/static/sessions.js" defer></script><script src="/static/app.js" defer></script>
+  <script src="/static/output.js" defer></script><script src="/static/manual.js" defer></script><script src="/static/sessions.js" defer></script><script src="/static/app.js" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -31,14 +31,65 @@
         <label class="outbound-only">目标端口<input id="target_port" type="number" min="1" max="65535"></label>
         <label class="adapter-only wide">模型服务 Base URL<input id="base_url" type="url" placeholder="https://api.deepseek.com"></label>
         <label class="adapter-only">API Key 环境变量名<input id="api_key_env" placeholder="DEEPSEEK_API_KEY"></label>
+        <label class="adapter-only wide">多服务轮询配置（JSON，可留空）<textarea id="services_json" rows="5" spellcheck="false" placeholder='[{"name":"primary","provider":"deepseek","base_url":"https://api.deepseek.com","api_key_env":"DEEPSEEK_API_KEY"},{"name":"backup","provider":"openai-compatible","base_url":"https://api.example.com/v1","api_key_env":"MODEL_BACKUP_KEY"}]'></textarea></label>
       </div>
       <div class="actions"><button id="save" class="secondary">保存连接设置</button><span id="dirty-note" class="muted">设置保存到独立旁文件，身份与信任文件保持原样。</span></div>
-      <p class="muted adapter-only">API Key 从本进程环境或启动目录的 .env 加载；页面不读取或展示凭据值。</p>
+      <p class="muted adapter-only">多个服务按请求轮询，支持 deepseek 与 openai-compatible。每项需要独立名称、Base URL 和 API Key 环境变量名；API Key 从本进程环境或启动目录的 .env 加载，页面不读取或展示凭据值。</p>
     </section>
     <section class="card">
       <div class="section-heading"><div><span class="eyebrow">02 / RUNTIME</span><h2 id="runtime-title">运行状态</h2></div><span id="phase" class="badge">未启动</span></div>
       <div class="actions"><button id="test" class="client-only secondary">测试网关认证</button><button id="start" class="server-only primary">启动本角色服务</button><button id="stop-service" class="server-only secondary">停止服务</button><span id="runtime-note" class="muted"></span></div>
       <details id="runtime-metrics"><summary>运行指标详情</summary><div id="metrics" class="metrics"></div></details>
+    </section>
+    <section class="card gateway-only" hidden>
+      <div class="section-heading"><div><span class="eyebrow">LIVE / CONNECTIONS</span><h2>实时连接监控</h2></div><span id="connection-count" class="badge">0 条进行中</span></div>
+      <p class="muted">每秒更新 · 展示客户端到网关的入站连接 · 收发量为已认证业务载荷字节</p>
+      <div class="table-scroll"><table class="connection-table"><thead><tr><th>连接 / 来源</th><th>认证身份</th><th>状态</th><th>持续时间</th><th>在途请求</th><th>接收 / 发送</th></tr></thead><tbody id="connections"></tbody></table></div>
+      <p id="connection-empty" class="empty-state">暂无进行中的连接。可在客户端启动连接模拟。</p>
+      <p id="connection-truncated" class="muted" hidden>当前只展示前 200 条连接，总数见上方。</p>
+      <details class="recent-connections"><summary>最近结束的连接（最多 100 条）</summary><div class="table-scroll"><table class="connection-table"><thead><tr><th>连接 / 来源</th><th>认证身份</th><th>结束原因</th><th>持续时间</th><th>在途请求</th><th>接收 / 发送</th></tr></thead><tbody id="recent-connections"></tbody></table></div></details>
+    </section>
+    <section class="card client-only" hidden>
+      <div class="section-heading"><div><span class="eyebrow">LAB / CLIENTS</span><h2>多客户端与异常连接模拟</h2></div><span id="simulation-phase" class="badge neutral">尚未运行</span></div>
+      <p class="muted">向当前已配置网关建立真实 TCP 连接；每条正常连接独立完成 SM2 认证，复用当前客户端身份。此实验只测试连接，不发送推理请求。</p>
+      <div class="form-grid"><label>连接类型<select id="simulation-mode"><option value="normal">正常认证并保持连接</option><option value="stalled_handshake">异常：TCP 建连后不发起握手</option><option value="malformed_frame">异常：发送非法协议帧</option><option value="abrupt_disconnect">异常：认证后突然断开</option></select></label><label>并发客户端数<input id="simulation-count" type="number" min="1" max="32" value="5"></label><label>最长保持时间（秒）<input id="simulation-duration" type="number" min="1" max="60" value="15"></label></div>
+      <div class="actions"><button id="simulation-start" class="primary">开始模拟</button><button id="simulation-stop" class="secondary" disabled>停止模拟</button><span id="simulation-summary" class="muted"></span></div>
+      <div class="table-scroll"><table class="connection-table"><thead><tr><th>模拟客户端</th><th>当前状态</th><th>结果</th></tr></thead><tbody id="simulation-clients"></tbody></table></div>
+    </section>
+    <section class="card client-only manual-lab" hidden>
+      <div class="section-heading"><div><span class="eyebrow">LAB / MANUAL</span><h2>手动协议与密钥实验</h2></div><span id="manual-phase" class="badge neutral">尚未连接</span></div>
+      <p class="muted">先建立实验连接，再逐步修改和发送。发送成功只代表已写入网络；请对照网关连接记录确认处理结果。每次实验最多 60 秒、64 次操作。</p>
+      <h3>1. 建立连接与握手故障</h3>
+      <div class="form-grid manual-connect-fields">
+        <label>连接方式<select id="manual-mode"><option value="secure">真实 SM2 安全握手</option><option value="raw">只建立 TCP，手动发送帧</option></select></label>
+        <label>握手故障<select id="manual-fault"><option value="none">使用原身份与信任</option><option value="signing_key">替换客户端签名私钥</option><option value="gateway_signing_key">替换受信任网关签名公钥</option><option value="gateway_encryption_key">替换网关加密公钥</option><option value="hello">篡改 ClientHello 随机挑战</option><option value="client_key">篡改 ClientKey 签名</option><option value="client_finished">篡改 ClientFinished 校验值</option><option value="server_hello">篡改 ServerHello 签名</option><option value="server_finished">篡改 ServerFinished 校验值</option><option value="client_key_replay">重放上次连接的 ClientKey</option></select></label>
+        <label>实验时限（秒）<input id="manual-duration" type="number" min="1" max="60" value="60"></label>
+        <label>声明的客户端身份<input id="manual-identity" maxlength="64" placeholder="留空使用当前身份；可填未知身份"></label>
+        <label>声明的密钥版本<input id="manual-version" type="number" min="1" max="4294967295" value="1"></label>
+        <label class="checkbox"><input id="manual-expired" type="checkbox">将本次客户端信任有效期设为已过期</label>
+      </div>
+      <details class="manual-connect-fields"><summary>手动输入本次握手的替代密钥</summary><p class="muted">留空使用原配置。私钥为 32 字节十六进制；公钥为 04 开头的 65 字节未压缩点。输入仅用于本次实验，提交后清空输入框。</p><div class="form-grid"><label>客户端签名私钥<input id="manual-signing-private" type="password" autocomplete="off" placeholder="64 个十六进制字符"></label><label>网关签名公钥<input id="manual-signing-public" type="password" autocomplete="off" placeholder="130 个十六进制字符"></label><label>网关加密公钥<input id="manual-encryption-public" type="password" autocomplete="off" placeholder="130 个十六进制字符"></label></div></details>
+      <div class="actions"><button id="manual-open" class="primary">建立手动实验连接</button><button id="manual-close" class="secondary" disabled>结束实验</button><span id="manual-connection" class="muted"></span></div>
+      <div class="manual-section"><h3>2. 修改发送密钥</h3><div class="path-row"><label>替代 SM4 密钥<input id="manual-sm4" type="password" autocomplete="off" placeholder="32 个十六进制字符，代表 16 字节"></label><button id="manual-key" class="secondary" disabled>应用替代密钥</button><button id="manual-restore" class="secondary" disabled>恢复协商密钥</button></div><p id="manual-key-state" class="muted">使用握手协商的密钥。</p></div>
+      <div class="manual-section"><h3>3. 编辑记录并手动发送</h3>
+        <div class="form-grid manual-record-fields">
+          <label>记录类型<select id="manual-record-type"><option value="3">HEARTBEAT 心跳</option><option value="1">REQUEST 未结束请求分片</option><option value="4">CANCEL 取消</option><option value="5">CLOSE 关闭</option><option value="6">CLOSE_ACK 关闭确认</option><option value="0">READY 就绪</option><option value="2">RESPONSE 响应</option><option value="7">ERROR 错误</option></select></label>
+          <label>序列号<input id="manual-sequence" inputmode="numeric" placeholder="留空使用下一序号"></label>
+          <label>分片序号<input id="manual-chunk" type="number" min="0" max="4294967295" value="0"></label>
+          <label>会话 ID<input id="manual-session" placeholder="留空使用当前会话；替代值为 32 个十六进制字符"></label>
+          <label>方向<select id="manual-direction"><option value="0">客户端 → 网关</option><option value="1">网关 → 客户端（错误方向）</option></select></label>
+          <label>请求 UUID<input id="manual-request-id" placeholder="留空自动分配／使用控制记录零 UUID"></label>
+          <label>替代 nonce<input id="manual-nonce" placeholder="留空使用序号派生值；替代值为 24 个十六进制字符"></label>
+          <label>加密后翻转的字节偏移<input id="manual-offset" type="number" min="0" placeholder="留空翻转最后一个标签字节"></label>
+          <label>XOR 掩码（十进制）<input id="manual-xor" type="number" min="1" max="255" value="1"></label>
+        </div>
+        <label>实验载荷<textarea id="manual-payload" rows="2" placeholder="心跳请留空；请求分片可填合成测试文本"></textarea></label>
+        <p class="muted">记录头占 52 字节；其后为密文，最后 16 字节为认证标签。REQUEST 始终作为未结束分片发送，可测试乱序与请求超时，不触发模型调用。</p>
+        <div class="actions"><button id="manual-send" class="primary" disabled>加密并发送记录</button><button id="manual-tamper" class="secondary" disabled>加密后篡改再发送</button><button id="manual-reflect" class="secondary" disabled>原样反射网关记录</button></div>
+        <div class="actions"><button id="manual-replay" class="secondary" disabled>原样重放本连接上一帧</button><button id="manual-cross" class="secondary" disabled>重放上次连接捕获帧</button><button id="manual-abort" class="secondary" disabled>突然断开 TCP</button><span id="manual-capture" class="muted"></span></div>
+        <details><summary>直接发送自定义原始帧</summary><label>帧内容（十六进制）<textarea id="manual-raw" rows="2" placeholder="例如 ff；自动添加四字节长度前缀，最多 8192 字节"></textarea></label><button id="manual-raw-send" class="secondary" disabled>发送原始帧</button></details>
+      </div>
+      <div class="manual-section"><h3>操作与观察记录</h3><p id="manual-result" class="muted">尚无实验结果。</p><ol id="manual-steps" class="manual-steps" aria-live="polite"></ol></div>
     </section>
     <section class="client-only inference-grid">
       <div class="card"><div class="section-heading"><div><span class="eyebrow">03 / REQUEST</span><h2>推理请求</h2></div><span class="badge neutral">单轮推理</span></div>

@@ -26,6 +26,8 @@ from gateway.contracts import InferenceRequest, InferenceResponse, PeerIdentity,
 from gateway.crypto import GmSSLBackend
 from gateway.server.relay import GatewayServer
 from gateway.session import LocalIdentity, SecuritySession, SecuritySessionManager, TrustRecord
+from gateway.session.protection import restricted
+from gateway.session.store import ResumptionStore
 from test.benchmark.transport import TransportManager, certificates
 from test.fixtures.mock_provider import MockProvider
 
@@ -44,7 +46,7 @@ class DisabledAudit:
 class MeasuredNative(SecuritySessionManager):
     """Keep real admission/handshake; time TCP and security on the same connection."""
 
-    async def _open(self, peer):
+    async def _open(self, peer, *, force_full=False):
         started = time.perf_counter()
         connected = None
         session = None
@@ -54,6 +56,7 @@ class MeasuredNative(SecuritySessionManager):
                 reader, writer = await asyncio.open_connection(*trust.address)
                 connected = time.perf_counter()
                 session = SecuritySession(self, reader, writer, peer)
+                session.force_full = force_full
                 self._sessions.add(session)
                 await session.handshake()
             return session
@@ -68,15 +71,16 @@ class MeasuredNative(SecuritySessionManager):
                     "tcp_ms": (connected - started) * 1000 if connected else None,
                     "security_ready_ms": (finished - connected) * 1000 if connected else None,
                     "secure_open_ms": (finished - started) * 1000,
+                    "resumed": session.resumed if session else False,
                 }
             )
 
 
-def manager(mode, role, identities, directory, port, manifest):
+def manager(mode, role, identities, directory, port, manifest, *, suffix=""):
     local, _ = identities[role]
     incoming = {"gateway": "client", "adapter": "gateway"}.get(role)
     outgoing = {"client": "gateway", "gateway": "adapter"}.get(role)
-    if mode != "gm":
+    if not mode.startswith("gm"):
         return TransportManager(
             local.peer,
             identities[incoming][0].peer if incoming else None,
@@ -93,7 +97,15 @@ def manager(mode, role, identities, directory, port, manifest):
             trusted[peer.peer.peer_id] = TrustRecord(
                 peer.peer, *keys, address=("127.0.0.1", port) if remote == outgoing else None
             )
-    mgr = MeasuredNative(backend, local, trusted)
+    store = None
+    if mode in {"gm-resume", "gm-combined"}:
+        name = f"{mode}-{role}{suffix}"
+        store_dir, key_dir = directory / (name + "-sessions"), directory / (name + "-keys")
+        if not store_dir.exists():
+            restricted(key_dir, create=True, directory=True)
+            ResumptionStore.initialize(store_dir, key_dir / "master.key", backend)
+        store = ResumptionStore(store_dir, key_dir / "master.key", backend)
+    mgr = MeasuredNative(backend, local, trusted, store=store)
     mgr.timings = []
     return mgr
 
@@ -103,7 +115,13 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
     owned = set()
     errors = Counter()
     audit = PrivacyAudit(capacity=8192) if audit_on else DisabledAudit()
-    gateway = GatewayServer(mgr, GatewayConfig(identities["adapter"][0].peer), audit)
+    gateway = GatewayServer(
+        mgr,
+        GatewayConfig(
+            identities["adapter"][0].peer, pool_enabled=mode in {"gm-pool", "gm-combined"}
+        ),
+        audit,
+    )
     adapter = Echo()
     audit_path = directory / f"{mode}-{audit_on}-{role}-audit.jsonl"
     log = audit_path.open("w", encoding="utf-8")
@@ -159,13 +177,15 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
                 "errors": errors,
                 "audit_healthy": audit.healthy if audit_on else True,
                 "audit_rejected": audit.rejected if audit_on else 0,
-                "active_sessions": len(mgr._sessions if mode == "gm" else mgr.sessions),
+                "active_sessions": len(mgr._sessions if mode.startswith("gm") else mgr.sessions),
+                "security_counts": mgr.session_counts() if mode.startswith("gm") else {},
+                "pool_counts": gateway.metrics.snapshot(None) if role == "gateway" else {},
                 "cipher_suites": sorted(mgr.negotiated) if mode == "tls" else [],
                 "open_errors": [
                     {"type": key[0], "winerror": key[1], "errno": key[2], "count": value}
                     for key, value in mgr.open_errors.items()
                 ]
-                if mode != "gm"
+                if not mode.startswith("gm")
                 else [],
             }
         )
@@ -334,6 +354,10 @@ async def measure(mgr, peer, size, concurrency, stream, count, seconds, processe
         "latency_samples_ms": latencies,
         "first_chunk_samples_ms": first_chunks,
         "resource_samples": samples,
+        "max_resource_gap_seconds": max(
+            (b["elapsed"] - a["elapsed"] for a, b in zip(samples, samples[1:], strict=False)),
+            default=0,
+        ),
         "request_encoded_bytes": len(encode_request(request, stream=stream)),
         "response_encoded_bytes": None
         if stream
@@ -379,7 +403,9 @@ async def run(args, output):
                             ("A", "client", gw[3], "gateway"),
                             ("B", "gateway", sim[3], "adapter"),
                         ):
-                            hm = manager(mode, role, identities, directory, port, manifest)
+                            hm = manager(
+                                mode, role, identities, directory, port, manifest, suffix="-probe"
+                            )
                             try:
                                 for index in range(args.handshakes + 5):
                                     begin = time.perf_counter()
@@ -500,6 +526,8 @@ def acceptance_problems(output, *, formal=False):
     if not output["complete"] or len(output["cases"]) != expected_cases:
         problems.append("incomplete workload matrix")
     for case in output["cases"]:
+        if case.get("max_resource_gap_seconds", 0) > 1:
+            problems.append("resource sampling interrupted")
         if (
             case["failures"]
             or case["successes"] < command["requests"]
@@ -553,7 +581,10 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("artifacts/performance.json"))
     parser.add_argument(
-        "--modes", nargs="+", choices=["gm", "tls", "plain"], default=["gm", "tls", "plain"]
+        "--modes",
+        nargs="+",
+        choices=["gm", "gm-resume", "gm-pool", "gm-combined", "tls", "plain"],
+        default=["gm", "tls", "plain"],
     )
     parser.add_argument("--sizes", nargs="+", type=int, default=[1024, 16384])
     parser.add_argument("--concurrency", nargs="+", type=int, default=[1, 10, 50, 100])

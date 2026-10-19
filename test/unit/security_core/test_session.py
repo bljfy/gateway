@@ -10,6 +10,7 @@ from uuid import uuid4
 import pytest
 
 import gateway.session.core as core
+import gateway.session.handshakes as handshakes
 from gateway.audit import PrivacyAudit
 from gateway.config import GatewayConfig
 from gateway.contracts import (
@@ -298,6 +299,7 @@ async def test_handshake_modification_cleans_pending(
             await write_frame(writer, data)
 
         monkeypatch.setattr(core, "write_frame", write)
+        monkeypatch.setattr(handshakes, "write_frame", write)
         with pytest.raises((GatewayError, OSError)):
             await pair.connect()
         await asyncio.sleep(0.02)
@@ -465,6 +467,7 @@ async def test_client_key_replay_is_not_accepted(
             await write_frame(writer, data)
 
         monkeypatch.setattr(core, "write_frame", replay)
+        monkeypatch.setattr(handshakes, "write_frame", replay)
         client, server = await pair.connect()
         with pytest.raises(GatewayError):
             await pair.connect()

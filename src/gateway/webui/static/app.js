@@ -42,7 +42,7 @@ function configured() {
 function controls() {
   const running = ["starting","running","stopping"].includes(state.phase);
   const locked = running || state.busy || actionBusy;
-  document.querySelectorAll(".config-card input,.config-card select").forEach(el => {el.disabled = !!locked;});
+  document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => {el.disabled = !!locked;});
   $("load").disabled = !!locked;
   $("save").disabled = !!locked || !state.config_loaded;
   $("test").disabled = !!locked || !state.config_loaded;
@@ -51,7 +51,11 @@ function controls() {
   $("infer").disabled = !!locked || !owner || !state.config_loaded || submitting;
   $("cancel").disabled = actionBusy || !state.busy || !currentId;
   $("clear").disabled = !!state.busy || submitting;
+  $("simulation-start").disabled = !!locked || !owner || !state.config_loaded;
+  $("simulation-stop").disabled = actionBusy || state.simulation?.phase !== "running";
+  for (const id of ["simulation-mode", "simulation-count", "simulation-duration"]) $(id).disabled = !!locked;
   $("dirty-note").textContent = dirty ? "有未保存的连接参数，请先保存。" : "设置保存到独立旁文件，身份与信任文件保持原样。";
+  ManualUI.controls(state, actionBusy, owner);
 }
 function metric(label, value) {
   const box = document.createElement("div"); box.className = "metric";
@@ -67,6 +71,7 @@ function render(next) {
   document.querySelectorAll(".client-only").forEach(el => {el.hidden = state.role !== "client";});
   document.querySelectorAll(".server-only").forEach(el => {el.hidden = state.role === "client";});
   document.querySelectorAll(".adapter-only").forEach(el => {el.hidden = state.role !== "adapter";});
+  document.querySelectorAll(".gateway-only").forEach(el => {el.hidden = state.role !== "gateway";});
   document.querySelectorAll(".outbound-only").forEach(el => {el.hidden = state.role === "adapter";});
   document.querySelectorAll(".gateway-only").forEach(el => {el.hidden = state.role !== "gateway";});
   GatewaySessions.setRole(state.role);
@@ -84,7 +89,43 @@ function render(next) {
   }
   if (state.error) notice(message(state.error));
   if (currentId && state.request_id === currentId && state.request_phase !== "idle") resultStatus(state.request_phase);
+  renderConnections(state.connections);
+  renderSimulation(state.simulation);
+  ManualUI.render(state.manual);
   controls();
+}
+const connectionLabels = {handshaking:"握手中",active:"已认证",closed:"已关闭",authentication_failed:"认证失败",protocol_rejected:"协议拒绝",timeout:"超时",capacity:"容量拒绝",stopped:"服务停止",failed:"连接失败"};
+function cells(row, values) {
+  for (const value of values) { const cell = document.createElement("td"); cell.textContent = String(value); row.append(cell); }
+}
+function connectionRows(target, items, recent) {
+  const fragment = document.createDocumentFragment();
+  for (const item of items) {
+    const row = document.createElement("tr");
+    const phase = recent ? item.result : item.phase;
+    cells(row, [item.id.slice(0,8) + " · " + item.source, item.peer || "尚未认证", connectionLabels[phase] || phase, item.duration_seconds + " 秒", item.inflight, item.received_bytes + " / " + item.sent_bytes + " B"]);
+    if (recent && !["closed","stopped"].includes(phase)) row.className = "connection-error";
+    fragment.append(row);
+  }
+  $(target).replaceChildren(fragment);
+}
+function renderConnections(data) {
+  if (!data) return;
+  $("connection-count").textContent = data.total_active + " 条进行中";
+  $("connection-empty").hidden = data.total_active > 0;
+  $("connection-truncated").hidden = !data.truncated;
+  connectionRows("connections", data.active, false);
+  connectionRows("recent-connections", data.recent, true);
+}
+function renderSimulation(data) {
+  if (!data) return;
+  $("simulation-phase").textContent = {running:"模拟进行中",completed:"批次已结束",cancelled:"已停止"}[data.phase] || data.phase;
+  const labels = {connecting:"连接中",authenticated:"已认证并保持",tcp_connected:"TCP 已连接",closed:"已结束",held:"保持时间结束",peer_closed:"网关已关闭连接",hold_elapsed:"到达保持时间",disconnected:"已主动中断",unexpected_data:"收到非预期数据",unexpected_record:"收到非预期记录",connection_failed:"连接失败或被关闭",cancelled:"已停止"};
+  const fragment = document.createDocumentFragment();
+  for (const client of data.clients) { const row = document.createElement("tr"); cells(row, ["客户端 " + client.client, labels[client.phase] || client.phase, labels[client.result] || "—"]); fragment.append(row); }
+  $("simulation-clients").replaceChildren(fragment);
+  const active = data.clients.filter(client => client.phase !== "closed").length;
+  $("simulation-summary").textContent = data.clients.length + " 个客户端 · " + active + " 个进行中";
 }
 function fill(data) {
   settings = data.settings; peers = data.peers || [];
@@ -151,6 +192,14 @@ $("infer").onclick = () => action(async () => {
   finally {submitting = false;}
 });
 $("cancel").onclick = () => action(async () => {render(await api("cancel", "POST", {request_id:currentId}));});
+$("simulation-start").onclick = () => action(async () => {
+  configured();
+  const count = Number($("simulation-count").value), duration = Number($("simulation-duration").value);
+  if (!Number.isInteger(count) || count < 1 || count > 32 || !Number.isInteger(duration) || duration < 1 || duration > 60) throw new Error("客户端数须为 1–32，保持时间须为 1–60 秒的整数。");
+  currentId = null;
+  render(await api("simulation", "POST", {owner, count, duration, mode:$("simulation-mode").value}));
+});
+$("simulation-stop").onclick = () => action(async () => {render(await api("simulation/stop", "POST"));});
 $("add-context").onclick = () => {
   if ($("contexts").children.length >= 64) return;
   const row = document.createElement("div"), area = document.createElement("textarea"), remove = document.createElement("button");
@@ -159,7 +208,8 @@ $("add-context").onclick = () => {
 };
 $("copy").onclick = () => action(async () => {await navigator.clipboard.writeText(answer?.text || ""); notice("结果已复制。");});
 $("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true); resultStatus("idle");};
-document.querySelectorAll(".config-card input,.config-card select").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
+document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close(); GatewaySessions.close();});
+ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
 action(async () => {render(await api("state")); fill(await api("config")); connect();});
