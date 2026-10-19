@@ -21,6 +21,7 @@ from gateway.crypto import GmSSLBackend
 from gateway.logging import EventLogger
 from gateway.metrics import Metrics, start_metrics_server
 from gateway.server import GatewayServer
+from gateway.server.observation import RelayEvent
 from gateway.session import LocalIdentity, SecuritySessionManager, TrustRecord
 
 LOGGER = EventLogger(__name__)
@@ -365,6 +366,7 @@ async def run_server(
     ready: Callable[[], None] | None = None,
     provider: ModelProvider | None = None,
     status: RuntimeStatus | None = None,
+    observer: Callable[[RelayEvent], None] | None = None,
 ) -> None:
     manager = runtime.manager
     role = manager.local.peer.role.value
@@ -376,7 +378,7 @@ async def run_server(
     audit = PrivacyAudit(runtime.gateway.audit_capacity, runtime.gateway.security_audit_capacity)
     status = status if status is not None else RuntimeStatus()
     status.audit = audit
-    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics)
+    relay = GatewayServer(manager, runtime.gateway, audit, status.metrics, observer)
     adapter: AdapterServer | None = None
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

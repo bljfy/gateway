@@ -1,6 +1,7 @@
 """Bounded ordinary request relay; business payload encoding belongs to C."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from time import monotonic
 from uuid import UUID, uuid4
@@ -23,6 +24,7 @@ from gateway.contracts import (
 )
 from gateway.logging import EventLogger
 from gateway.metrics import Metrics
+from gateway.server.observation import RelayEvent
 
 LOGGER = EventLogger(__name__)
 
@@ -52,6 +54,7 @@ class GatewayServer:
         config: GatewayConfig,
         audit: AuditSink,
         metrics: Metrics | None = None,
+        observer: Callable[[RelayEvent], None] | None = None,
     ) -> None:
         self.manager = manager
         self.config = config
@@ -64,6 +67,15 @@ class GatewayServer:
         self._opening = 0
         self._closing = False
         self._audit_failed = False
+        self.observer = observer
+
+    def _observe(self, event: RelayEvent) -> None:
+        if self.observer is not None:
+            try:
+                self.observer(event)
+            except Exception:
+                # A display failure must never interrupt forwarding or expose data in logs.
+                pass
 
     def _publish(self, event: AuditEvent, *, terminal: bool = False) -> bool:
         try:
@@ -104,6 +116,13 @@ class GatewayServer:
         self.metrics.pending_sessions += 1
         inbound: SecureSession | None = None
         activated = False
+        connection_id = str(uuid4())
+        if self.observer is not None:
+            self._observe(
+                RelayEvent(
+                    "connected", connection_id, address=str(writer.get_extra_info("peername") or "")
+                )
+            )
         LOGGER.info("client_connection_received")
         try:
             try:
@@ -125,7 +144,8 @@ class GatewayServer:
             self.metrics.active_sessions += 1
             activated = True
             LOGGER.info("client_authenticated")
-            await self._serve(inbound)
+            self._observe(RelayEvent("authenticated", connection_id, peer=inbound.peer.peer_id))
+            await self._serve(inbound, connection_id)
         except asyncio.CancelledError:
             raise
         except AuthenticationError:
@@ -150,6 +170,7 @@ class GatewayServer:
                 writer.close()
                 self._connections.discard(current)
                 LOGGER.info("client_connection_closed")
+                self._observe(RelayEvent("closed", connection_id))
 
     async def _close_session(self, session: SecureSession) -> None:
         try:
@@ -158,7 +179,7 @@ class GatewayServer:
         except Exception:
             self._publish(AuditEvent("session_failed", "failed"), terminal=True)
 
-    async def _serve(self, inbound: SecureSession) -> None:
+    async def _serve(self, inbound: SecureSession, connection_id: str = "") -> None:
         requests: dict[UUID, _Request] = {}
         sending: set[asyncio.Task[None]] = set()
         send_lock = asyncio.Lock()
@@ -253,7 +274,7 @@ class GatewayServer:
                 queued += cost
                 if header.end_of_message:
                     item.task = asyncio.create_task(
-                        self._forward(inbound, item, send_lock, sending)
+                        self._forward(inbound, item, send_lock, sending, connection_id)
                     )
         finally:
             tasks: list[asyncio.Task[object]] = []
@@ -334,6 +355,7 @@ class GatewayServer:
         item: _Request,
         lock: asyncio.Lock,
         sending: set[asyncio.Task[None]],
+        connection_id: str = "",
     ) -> None:
         upstream: SecureSession | None = None
         reserved = False
@@ -341,6 +363,15 @@ class GatewayServer:
         result = "failed"
         response_size = 0
         request_id = item.records[0].header.request_id
+        if self.observer is not None:
+            self._observe(
+                RelayEvent(
+                    "request",
+                    connection_id,
+                    request_id=request_id,
+                    payload=b"".join(record.plaintext for record in item.records),
+                )
+            )
         try:
             if (
                 self._outbound >= self.config.limits.max_active
@@ -406,6 +437,15 @@ class GatewayServer:
                         raise CapacityError("response body limit exceeded")
                     async with lock:
                         await self._send_response(inbound, response, item.deadline, sending)
+                    self._observe(
+                        RelayEvent(
+                            "response",
+                            connection_id,
+                            request_id=request_id,
+                            payload=response.plaintext,
+                            final=header.end_of_message,
+                        )
+                    )
                     if header.end_of_message:
                         result = "ok"
                         self.metrics.increment("requests_completed")
@@ -418,6 +458,9 @@ class GatewayServer:
             result = "timeout"
             raise
         finally:
+            self._observe(
+                RelayEvent("finished", connection_id, request_id=request_id, result=result)
+            )
             if result != "ok":
                 self.metrics.increment("requests_failed")
             self._publish(
