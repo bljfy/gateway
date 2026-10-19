@@ -17,13 +17,19 @@ peer_id = "adapter"
 key_version = 1
 
 [gateway]
-suite = "SM2-SM4-GCM-SM3-v1"
+suite = "SM2-SM4-GCM-SM3-v2"
 tag_bytes = 16
 audit_capacity = 1024
 security_audit_capacity = 128
 metrics_host = "127.0.0.1"
 metrics_port = 9100
 log_level = "INFO"
+resumption_enabled = false
+resumption_lifetime_seconds = 1800
+pool_enabled = false
+pool_max_connections = 8
+pool_max_waiters = 100
+pool_idle_seconds = 60
 
 [session]
 handshake_timeout_seconds = 5
@@ -67,6 +73,7 @@ max_plaintext_bytes_per_direction = 1073741824
 | `audit_file` | 网关本地审计 JSONL 文件，默认 `audit.jsonl` |
 | `provider`、`base_url`、`api_key_env` | adapter 单服务配置；也可用 `services` 配置多服务，详见模型连接配置 |
 | `trust` | 最多 64 个预置公钥身份，见下文 |
+| `secret_store` | 恢复启用时必填，包含 `directory` 和 `master_key_file`；每角色独立，主密钥位于数据库目录外 |
 
 每条信任记录包含 `peer_id`、`role`、`signing_public_key`、`encryption_public_key`（十六进制公钥）；出站目标另需 `host`、`port`。`enabled` 默认为 true，`expires_at` 为 Unix 秒时间戳，演示默认 4102444800；部署时设置实际有效期。客户端仅信任网关，adapter 仅信任网关，网关信任客户端与固定 adapter。业务请求不能修改信任表。口令文件与加密私钥同目录仅用于本地原型，生产密钥托管另行配置。
 
@@ -103,8 +110,9 @@ DTO 入口在编码前检查文本 UTF-8 总字节数、返回时检查输出大
 记录头的请求标识、方向、类型、分片连续性和结束标志由 B 额外验证。
 `GatewayServer` 同时转发完整响应与 C 的流式响应；`ForwardingService` 的 DTO 接口仍仅支持普通响应。
 
-每个请求使用新建的独立上游会话，仅向配置的身份发送，成功或失败后关闭。
-这是首版有界转发策略，尚未实现上游连接池复用。它避免跨请求单读者争用，代价是每次请求握手。
+`pool_enabled=false` 时，每个请求使用独立上游会话并在结束后关闭。
+启用连接池后，每条连接独占租用给一个请求，成功且终结审计接纳后归还，失败则销毁；仅访问配置身份。
+新 `init-demo` 默认启用恢复及连接池；旧配置的新开关默认为 false。协议、存储初始化、平台权限、撤销及迁移见[会话恢复说明](session_resumption.md)。
 入站最多 `max_active` 个活跃/待认证连接，最多 `max_pending` 个待认证连接；
 出站分别受相同两个限额约束。A manager 还应执行整体资源上限。
 

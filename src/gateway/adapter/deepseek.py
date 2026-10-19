@@ -64,7 +64,7 @@ class DeepSeekProvider:
                     messages=self._messages(request),
                     max_tokens=request.max_output_tokens,
                     stream=False,
-                    **({"extra_body": options} if options is not None else {}),
+                    extra_body=options,
                 )
                 if len(result.choices) != 1:
                     raise GatewayError("invalid model response")
@@ -94,7 +94,7 @@ class DeepSeekProvider:
                     messages=self._messages(request),
                     max_tokens=request.max_output_tokens,
                     stream=True,
-                    **({"extra_body": options} if options is not None else {}),
+                    extra_body=options,
                 )
             async with stream:
                 index = 0

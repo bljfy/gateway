@@ -160,15 +160,35 @@ class Controller:
             self.authenticated = False
             self.changed()
 
-    def new_runtime(self) -> Runtime:
+    def new_runtime(self, *, disable_resumption: bool = False) -> Runtime:
         if self.settings is None:
             raise ControlError("config_required")
         try:
-            runtime = self.settings.runtime(self.role)
+            runtime = self.settings.runtime(self.role, disable_resumption=disable_resumption)
             set_log_level(runtime.gateway.log_level)
             return runtime
         except Exception:
             raise ControlError("config_invalid") from None
+
+    async def credentials(
+        self, *, revoke: bool = False, peer_id: str | None = None
+    ) -> list[dict[str, str | int]]:
+        """Operate through the running owner; offline commands use a temporary owner."""
+        async with self.lock:
+            runtime = self.runtime or self.operation_runtime
+            owned = runtime is None or runtime.manager._closed
+            if owned:
+                runtime = self.new_runtime()
+            assert runtime is not None
+            try:
+                if runtime.manager.store is None:
+                    raise ControlError("credential_storage_disabled", 409)
+                if revoke:
+                    await runtime.manager.revoke(peer_id)
+                return runtime.manager.store.status()
+            finally:
+                if owned:
+                    await runtime.manager.close()
 
     async def start(self) -> None:
         async with self.lock:
@@ -434,7 +454,7 @@ class Controller:
                 raise
             except Exception:
                 raise ControlError("request_invalid") from None
-            runtime = self.new_runtime()
+            runtime = self.new_runtime(disable_resumption=True)
             previous = (self.manual.captured or self.manual.previous) if self.manual else b""
             previous_key = (
                 (self.manual.key_frame or self.manual.previous_key_frame) if self.manual else b""

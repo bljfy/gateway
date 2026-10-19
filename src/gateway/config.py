@@ -4,6 +4,7 @@ import ipaddress
 import tomllib
 from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import cast
 
 from gateway.contracts import MAX_RECORD_PLAINTEXT, PeerIdentity, PeerRole, SessionPolicy
 from gateway.logging import validate_level
@@ -48,19 +49,25 @@ class GatewayConfig:
     upstream: PeerIdentity
     limits: Limits = Limits()
     session: SessionPolicy = SessionPolicy()
-    suite: str = "SM2-SM4-GCM-SM3-v1"
+    suite: str = "SM2-SM4-GCM-SM3-v2"
     tag_bytes: int = 16
     audit_capacity: int = 1024
     security_audit_capacity: int = 128
     metrics_host: str = "127.0.0.1"
     metrics_port: int = 9100
     log_level: str = "INFO"
+    resumption_enabled: bool = False
+    resumption_lifetime_seconds: int = 1800
+    pool_enabled: bool = False
+    pool_max_connections: int = 8
+    pool_max_waiters: int = 100
+    pool_idle_seconds: int = 60
 
     def __post_init__(self) -> None:
         validate_level(self.log_level)
         if self.upstream.role is not PeerRole.ADAPTER:
             raise ValueError("upstream must have adapter role")
-        if self.suite != "SM2-SM4-GCM-SM3-v1" or type(self.tag_bytes) is not int:
+        if self.suite != "SM2-SM4-GCM-SM3-v2" or type(self.tag_bytes) is not int:
             raise ValueError("unsupported cipher suite or tag")
         if self.tag_bytes != 16:
             raise ValueError("GCM tag must contain 16 bytes")
@@ -74,6 +81,19 @@ class GatewayConfig:
             raise ValueError("request timeout exceeds usable session lifetime")
         positive(self.audit_capacity, "audit_capacity")
         positive(self.security_audit_capacity, "security_audit_capacity")
+        if type(self.resumption_enabled) is not bool or type(self.pool_enabled) is not bool:
+            raise ValueError("invalid feature switch")
+        for name in (
+            "resumption_lifetime_seconds",
+            "pool_max_connections",
+            "pool_max_waiters",
+            "pool_idle_seconds",
+        ):
+            positive(getattr(self, name), name)
+        if self.resumption_lifetime_seconds > 1800 or self.resumption_lifetime_seconds <= (
+            self.limits.request_timeout_seconds + self.session.rotate_before_seconds
+        ):
+            raise ValueError("invalid resumption lifetime")
         if not ipaddress.ip_address(self.metrics_host).is_loopback:
             raise ValueError("metrics must bind a loopback IP literal")
         if positive(self.metrics_port, "metrics_port") > 65535:
@@ -129,6 +149,24 @@ def load_config(path: Path) -> GatewayConfig:
                 options.get("metrics_port", defaults.metrics_port), "metrics_port"
             ),
             log_level=validate_level(options.get("log_level", defaults.log_level)),
+            resumption_enabled=cast(
+                bool, options.get("resumption_enabled", defaults.resumption_enabled)
+            ),
+            resumption_lifetime_seconds=positive(
+                options.get("resumption_lifetime_seconds", defaults.resumption_lifetime_seconds),
+                "resumption_lifetime_seconds",
+            ),
+            pool_enabled=cast(bool, options.get("pool_enabled", defaults.pool_enabled)),
+            pool_max_connections=positive(
+                options.get("pool_max_connections", defaults.pool_max_connections),
+                "pool_max_connections",
+            ),
+            pool_max_waiters=positive(
+                options.get("pool_max_waiters", defaults.pool_max_waiters), "pool_max_waiters"
+            ),
+            pool_idle_seconds=positive(
+                options.get("pool_idle_seconds", defaults.pool_idle_seconds), "pool_idle_seconds"
+            ),
         )
     except (ValueError, TypeError, OSError):
         raise ValueError("invalid gateway configuration") from None

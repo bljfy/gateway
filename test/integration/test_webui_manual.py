@@ -39,7 +39,7 @@ async def open_lab(uis, owner, **options):
 
 @pytest.mark.asyncio
 async def test_manual_stepwise_key_restore_privacy_and_identity_files(uis):
-    originals = {path.name: path.read_bytes() for path in uis.directory.iterdir()}
+    originals = {path.name: path.read_bytes() for path in uis.directory.iterdir() if path.is_file()}
     assert (await uis.api("gateway", "start", "POST"))[0] == 200
     ws, owner = await uis.ws()
     try:

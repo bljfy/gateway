@@ -148,6 +148,15 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         await controller.manual_action(await body(request))
         return web.json_response(controller.snapshot())
 
+    async def credentials(request: web.Request) -> web.Response:
+        peer_id = None
+        if request.method == "POST":
+            values = table(await body(request), {"peer_id"})
+            if "peer_id" in values:
+                peer_id = text(values["peer_id"], maximum=64)
+        rows = await controller.credentials(revoke=request.method == "POST", peer_id=peer_id)
+        return web.json_response({"count": len(rows), "credentials": rows})
+
     async def websocket(request: web.Request) -> web.WebSocketResponse:
         if len(sockets) >= SOCKET_CAPACITY:
             raise ControlError("capacity_rejected", 503)
@@ -243,6 +252,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.post("/api/simulation/stop", stop_simulation),
             web.post("/api/manual/open", manual_open),
             web.post("/api/manual/action", manual_action),
+            web.get("/api/session-keys", credentials),
+            web.post("/api/session-keys/revoke", credentials),
             web.get("/api/ws", websocket),
         ]
     )

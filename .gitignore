@@ -1,5 +1,10 @@
 .worktrees/
 .venv/
+.venv-linux/
+*.sessions/
+*.secrets/
+credentials.sqlite3*
+master.key
 __pycache__/
 *.py[cod]
 .pytest_cache/

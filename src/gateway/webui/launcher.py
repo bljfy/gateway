@@ -60,6 +60,9 @@ def launch(
     if not directory.exists():
         prepare_demo(directory, manifest)
     processes: list[tuple[subprocess.Popen[bytes], Path]] = []
+    creation_flags = 0
+    if sys.platform == "win32":
+        creation_flags = subprocess.CREATE_NO_WINDOW
     with TemporaryDirectory(prefix="launcher-", dir=directory) as temporary:
         try:
             for role in (PeerRole.ADAPTER, PeerRole.GATEWAY, PeerRole.CLIENT):
@@ -79,7 +82,7 @@ def launch(
                         "--stop-file",
                         str(child_stop),
                     ],
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    creationflags=creation_flags,
                     start_new_session=os.name != "nt",
                 )
                 processes.append((process, child_stop))

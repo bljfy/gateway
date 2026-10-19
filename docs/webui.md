@@ -46,7 +46,7 @@ Linux 使用 `.venv/bin/guomi-gateway`。不指定 `--config` 时读取 `.tools/
 
 Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链接不生成可点击元素；合法 HTTP(S)、mailto 和锚点链接在隔离的新页面打开。图片显示替代文字，不自动加载模型提供的图片地址。渲染只影响客户端展示，原国密链路、响应元数据、CLI 和业务契约不变。
 
-“认证成功”仅表示最近一次网关安全握手成功；每次请求仍独立建连。adapter 监听就绪不证明远端模型可用；只有本次运行已有响应发送完成时，页面才显示已有模型请求完成。
+“认证成功”仅表示最近一次网关安全握手成功；每次客户端请求仍独立建连，启用会话恢复时可使用轻量恢复握手。网关上游可独占复用健康池连接。adapter 监听就绪不证明远端模型可用；只有本次运行已有响应发送完成时，页面才显示已有模型请求完成。
 
 ## 实时连接与客户端模拟
 
@@ -115,6 +115,8 @@ adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compati
 
 在可信初始化机器生成一次配套身份，再通过带外安全渠道分发每个角色所需的 JSON、TOML、该角色加密私钥与口令文件。每台主机本地构建／校验原生库，更新自己的 `native_manifest` 路径；不要在三台机器分别独立运行 init-demo 后直接连接，独立生成的公钥不互信。对私钥与口令限制文件权限，原生库和路径配置遵循 [协议说明](protocol.md#原生环境)。实验网络只需允许业务端口 18443、19443；UI 和原指标端口保持回环访问。
 
+启用恢复时，在每台目标主机用实际服务账户创建受限主密钥父目录，再执行 `guomi-gateway session-keys init --config <本机角色.json>` 初始化独立存储。恢复数据库和本地主密钥不随身份分发；Windows DPAPI 文件绑定本机账户。路径、权限及迁移步骤见[会话恢复说明](session_resumption.md)。
+
 ## 安全边界
 
 浏览器到本机 UI 服务使用 HTTP；只有 Python 角色间两段业务连接使用现有 SM2 / SM4-GCM，adapter 到远端模型使用 HTTPS。页面不是浏览器国密实现，也不改变网关可接触业务明文的原安全边界。回环无登录边界不隔离同机恶意进程，不应通过代理暴露 UI。
@@ -129,6 +131,8 @@ adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compati
 | --- | --- |
 | GET `/api/state` | role、phase、config_loaded、busy、error、最近请求 UUID／阶段、认证结果、数值 metrics |
 | GET `/api/config` | 本角色 settings 与目标候选身份／地址／启用状态，不含信任公钥 |
+| GET `/api/session-keys` | `{count,credentials}`，每项仅含 peer_id、expires_at；存储异常返回错误，不返回秘密或 ticket |
+| POST `/api/session-keys/revoke` | `{peer_id}` 撤销指定对端，空对象撤销全部；关闭本进程相关会话，返回最新存储状态 |
 | POST `/api/config/load` | `{config_path}`，加载该角色的本地身份与旁文件 |
 | PUT `/api/config` | 完整 settings；必须先加载对应身份，禁止用保存操作切换身份 |
 | POST `/api/start`、`/api/stop` | 网关／adapter 生命周期，返回 state；启动失败为 503 |

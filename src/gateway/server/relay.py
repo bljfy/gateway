@@ -24,6 +24,7 @@ from gateway.contracts import (
 )
 from gateway.logging import EventLogger
 from gateway.metrics import Metrics
+from gateway.server.pool import UpstreamPool
 
 LOGGER = EventLogger(__name__)
 
@@ -67,6 +68,7 @@ class GatewayServer:
         self._opening = 0
         self._closing = False
         self._audit_failed = False
+        self.pool = UpstreamPool(manager, config, self.metrics) if config.pool_enabled else None
 
     def _publish(self, event: AuditEvent, *, terminal: bool = False) -> bool:
         try:
@@ -378,8 +380,13 @@ class GatewayServer:
                 self._opening += 1
                 try:
                     LOGGER.info("upstream_connecting", audit_id=item.audit_id)
-                    async with asyncio.timeout(self.config.session.handshake_timeout_seconds):
-                        upstream = await self.manager.open(self.config.upstream)
+                    if self.pool is not None:
+                        upstream = await self.pool.acquire(
+                            item.deadline, request_records=len(item.records)
+                        )
+                    else:
+                        async with asyncio.timeout(self.config.session.handshake_timeout_seconds):
+                            upstream = await self.manager.open(self.config.upstream)
                 finally:
                     self._opening -= 1
                 if upstream is inbound:
@@ -447,7 +454,7 @@ class GatewayServer:
         finally:
             if result != "ok":
                 self.metrics.increment("requests_failed")
-            self._publish(
+            audited = self._publish(
                 AuditEvent(
                     "request_finished",
                     result,
@@ -459,7 +466,12 @@ class GatewayServer:
             )
             try:
                 if upstream is not None and upstream is not inbound:
-                    await self._close_session(upstream)
+                    if self.pool is not None:
+                        await self.pool.release(
+                            upstream, reusable=result == "ok" and audited and not self._audit_failed
+                        )
+                    else:
+                        await self._close_session(upstream)
             finally:
                 if reserved:
                     self._outbound -= 1
@@ -471,4 +483,6 @@ class GatewayServer:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if self.pool is not None:
+            await self.pool.close()
         await self.manager.close()

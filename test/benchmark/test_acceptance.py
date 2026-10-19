@@ -54,6 +54,7 @@ def evidence():
         "handshake",
         "shutdown",
         "matrix",
+        "sampling_gap",
     ],
 )
 def test_reject_damaged_evidence(fault):
@@ -78,6 +79,8 @@ def test_reject_damaged_evidence(fault):
         data["shutdown"].pop()
     elif fault == "matrix":
         data["cases"].clear()
+    elif fault == "sampling_gap":
+        data["cases"][0]["max_resource_gap_seconds"] = 2
     assert acceptance_problems(data)
 
 

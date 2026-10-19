@@ -91,3 +91,9 @@ $env:PATH = (Split-Path -Parent $manifest.library) + ';' + $env:PATH
 样例数据记录来源或生成脚本、生成种子和预期结果，保证可复用。密码材料及报告字段遵循上述验收设计，大体积产物记录存储位置及校验值。
 
 CI 报告保存要求见 [CI/CD 规范](ci_cd.md)。pytest 用法参考 [官方文档](https://docs.pytest.org/en/stable/getting-started.html)。
+
+## 恢复存储与连接池验证
+
+`test/unit/security_core/test_resumption.py` 使用真实 GmSSL 和独立 HMAC 对照验证 HKDF、加密落盘、独占文件锁、恢复不续期、独立流量密钥、缓存缺失、过期、身份/策略变化、握手篡改与重放。`test/unit/gateway/test_pool.py` 检查独占租用、容量、等待、取消、空闲回收和停机。`test/integration/test_persistent_sessions.py` 启动两个独立 client 进程，验证磁盘恢复和上游池命中。
+
+Windows 使用实际服务账户运行 DPAPI/ACL 测试，Linux 的秘密测试目录必须位于支持 POSIX 权限的文件系统；WSL 的 Windows 挂载目录不能代替该权限验证。平台结果、已执行矩阵及限制记录在[恢复性能与验证](resumption_results.md)。

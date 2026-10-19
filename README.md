@@ -15,6 +15,8 @@ flowchart LR
 
 adapter 负责已认证请求的业务编解码、模型接口转换、响应分片和取消清理；网关负责身份认证、安全转发、资源限额与审计。adapter 可配置最多 16 个 DeepSeek 或 OpenAI-compatible 服务，并按请求轮询分配。单服务配置仍兼容；各服务需提供相同的请求模型名。
 
+握手 v2 支持 Windows/Linux 加密保存恢复秘密、30 分钟内跨连接恢复以及网关上游独占连接池。新演示配置默认启用；已有三端须同步升级，启用、撤销和安全边界见[会话恢复说明](docs/session_resumption.md)。
+
 ## 快速开始
 
 Windows（PowerShell）：

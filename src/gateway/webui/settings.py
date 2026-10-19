@@ -73,11 +73,12 @@ class Settings:
             fields.pop("api_key_env")
         return fields
 
-    def runtime(self, role: PeerRole) -> Runtime:
+    def runtime(self, role: PeerRole, *, disable_resumption: bool = False) -> Runtime:
         return load_runtime(
             Path(self.config_path),
             role,
             overrides=RuntimeOverrides(
+                disable_resumption=disable_resumption,
                 listen=(self.listen_host, self.listen_port)
                 if role is not PeerRole.CLIENT
                 else None,
@@ -85,9 +86,7 @@ class Settings:
                 target_address=(self.target_host, self.target_port)
                 if role is not PeerRole.ADAPTER
                 else None,
-                adapter_config=self.adapter_config()
-                if role is PeerRole.ADAPTER
-                else None,
+                adapter_config=self.adapter_config() if role is PeerRole.ADAPTER else None,
             ),
         )
 

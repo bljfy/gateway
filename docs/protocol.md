@@ -1,8 +1,8 @@
 # 安全协议与 A 线交付
 
-公共契约版本 2.0。实现入口为 `gateway.crypto.GmSSLBackend` 和 `gateway.session.SecuritySessionManager`。已实现真实 SM2 双向认证、72 字节密钥材料传送、双向密钥确认、SM4-GCM 记录、严格方向序列、时间与使用预算、轮换、认证关闭和异常清理。该协议是专用原型协议，不具备 TLS/TLCP 互操作能力，也不提供前向保密。
+公共契约版本 2.0，握手版本 2。实现入口为 `gateway.crypto.GmSSLBackend` 和 `gateway.session.SecuritySessionManager`。完整握手传送 104 字节材料，支持加密持久化恢复秘密、HMAC-SM3 恢复握手与独立流量密钥派生；记录层保留 SM4-GCM、严格方向序列、时间/使用预算和认证关闭。恢复线格式与存储安全边界见[专项说明](session_resumption.md)。该协议是专用原型，不具备 TLS/TLCP 互操作能力，也不提供前向保密。
 
-契约 2.0 将推理侧身份角色改为 adapter，只授权 client→gateway→adapter。身份角色字符串参与握手编码及认证摘要；旧 simulator 对端不再受支持，三端配置需要同步迁移。记录头部版本和套件保持原编码。adapter 至真实模型的 HTTPS 链路由 provider SDK 提供，国密记录保护范围止于 adapter。
+契约 2.0 将推理侧身份角色改为 adapter，只授权 client→gateway→adapter。身份角色字符串参与握手编码及认证摘要；旧 simulator 对端不再受支持，三端配置需要同步迁移。记录头部版本仍为 1，当前握手与套件为 v2。adapter 至真实模型的 HTTPS 链路由 provider SDK 提供，国密记录保护范围止于 adapter。
 
 ## 原生环境
 
@@ -45,11 +45,11 @@ $env:PATH = (Split-Path -Parent $nativeManifest.library) + ';' + $env:PATH
 
 完整 bootstrap 会读取该清单并设置测试进程的加载路径。原生库必须在进程首次导入绑定前完成配置；后端检查文件哈希、绑定版本、原生版本与实际加载路径，不允许进程中途切换不同原生库。
 
-Linux 使用同一构建模块，设置 `GMSSL_LIBRARY` 为 `.tools/gmssl/lib/libgmssl.so.3.1` 的绝对路径，`GMSSL_SHA256` 来自清单，`LD_LIBRARY_PATH` 首项为该库所在目录。模块核查 `/proc/self/maps` 中实际映射的库。Linux 构建、MSVC 构建及云端 CI 尚未本地验收；CI 已提供 Windows/Linux 构建与测试步骤，须以实际运行记录确认支持。
+Linux 使用同一构建模块，设置 `GMSSL_LIBRARY` 为 `.tools/gmssl/lib/libgmssl.so.3.1` 的绝对路径，`GMSSL_SHA256` 来自清单，`LD_LIBRARY_PATH` 首项为该库所在目录。模块核查 `/proc/self/maps` 中实际映射的库。当前 Windows/Linux 构建及回归证据见[恢复验证结果](resumption_results.md)；MSVC 构建及本次远端 CI 尚未验收，不以本地结果代替远端状态。
 
 ## 密码编码与密钥提供
 
-SM2 私钥接口使用 32 字节大端标量，公钥使用 65 字节未压缩点 `04 || X || Y`，公钥点由原生库校验。签名与密文均使用 GmSSL 3.1.1 的 ASN.1 DER 编码；签名长度 8–72 字节，SM2 明文长度 1–255 字节。握手已验证能传送 72 字节材料。
+SM2 私钥接口使用 32 字节大端标量，公钥使用 65 字节未压缩点 `04 || X || Y`，公钥点由原生库校验。签名与密文均使用 GmSSL 3.1.1 的 ASN.1 DER 编码；签名长度 8–72 字节，SM2 明文长度 1–255 字节。握手传送 104 字节材料。
 
 `sign_sm2` / `verify_sm2` 使用完整消息签名上下文 `Sm2Signature`，signer ID 明确为相应身份的 UTF-8 编码，最长 64 字节。随机数调用原生 `rand_bytes` 并检查返回值。`seal_sm4_gcm` 返回密文与 16 字节标签，nonce 固定为 12 字节；解密暂存输出直到 `finish()` 验证成功才返回。
 
@@ -65,17 +65,17 @@ SM2 私钥接口使用 32 字节大端标量，公钥使用 65 字节未压缩�
 
 | 类型 | 内容 |
 | --- | --- |
-| 1 ClientHello | `01 || F(01, suite, initiator_identity, acceptor_identity, Nc)` |
-| 2 ServerHello | `02 || F(body, signature)`；`body = F(Ns, session_id, uint32(lifetime), uint32(handshake_timeout))` |
+| 1 ClientHello | `01 || F(02, suite, initiator_identity, acceptor_identity, Nc, capability)` |
+| 2 ServerHello | `02 || F(body, signature)`；`body = F(Ns, session_id, uint32(lifetime), uint32(handshake_timeout), ticket, uint64(expiry))` |
 | 3 ClientKey | `03 || F(SM2_ciphertext, signature)` |
-| 4 ServerFinished | `04 || HMAC-SM3(K_finish, F(server-finished, T))` |
-| 5 ClientFinished | `05 || HMAC-SM3(K_finish, F(client-finished, T))` |
+| 4 ServerFinished | `04 || HMAC-SM3(K_finish, F(server-finished-v2, T))` |
+| 5 ClientFinished | `05 || HMAC-SM3(K_finish, F(client-finished-v2, T))` |
 
-suite 为 ASCII `SM2-SM4-GCM-SM3-v1`。`Nc`、`Ns` 各 32 字节，会话 ID 为接收方随机生成的 16 字节，并检查待建立及活跃集合冲突。双方身份、角色、密钥版本与挑战通过完整 ClientHello 绑定到签名。
+suite 为 ASCII `SM2-SM4-GCM-SM3-v2`。`Nc`、`Ns` 各 32 字节，会话 ID 为接收方随机生成的 16 字节，并检查待建立及活跃集合冲突。capability 为 0/1 单字节；双方启用恢复时 ticket 为 32 字节，否则为空且 expiry 为零。双方身份、角色、密钥版本与挑战通过完整 ClientHello 绑定到签名。
 
-ServerHello 签名输入为 `F(server-hello, SM3(ClientHello), body)`；ClientKey 签名输入为 `F(client-key, SM3(F(ClientHello, ServerHello)), SM2_ciphertext)`。`T = SM3(F(ClientHello, ServerHello, ClientKey))`，包含完整签名消息。双方 Finished 使用不同域并恒定时间比较；接收方先验证 ClientKey 签名，再解密。
+ServerHello 签名输入为 `F(server-hello-v2, SM3(ClientHello), body)`；ClientKey 签名输入为 `F(client-key-v2, SM3(F(ClientHello, ServerHello)), SM2_ciphertext)`。`T = SM3(F(ClientHello, ServerHello, ClientKey))`，包含完整签名消息。双方 Finished 使用不同域并恒定时间比较；接收方先验证 ClientKey 签名，再解密。
 
-密钥材料顺序为发起方向 SM4 key 16 字节、接收方向 key 16 字节、发起方向 nonce 前缀 4 字节、接收方向前缀 4 字节、Finished key 32 字节。Finished 后释放确认密钥，仅保留前 40 字节记录保护材料。
+密钥材料顺序为发起方向 SM4 key 16 字节、接收方向 key 16 字节、发起方向 nonce 前缀 4 字节、接收方向前缀 4 字节、Finished key 32 字节、恢复秘密 32 字节。确认后释放握手材料，进程会话仅保留前 40 字节；启用恢复时独立加密保存最后 32 字节。
 
 接收方发送认证 READY，明文为 `T`，使用接收方向序号 0。发起方验证 READY 后进入 ACTIVE；接收方完成 READY 写入后进入 ACTIVE。后续接收方向序号从 1 开始，发起方向从 0 开始。握手期间业务接口不可用。
 
@@ -101,7 +101,7 @@ manager 限制活跃及待建立总量、待建立量和密码执行并发。密
 
 `send` 内部分配序号，`recv` 要求单一调用者。`send` 不开放 READY/CLOSE/CLOSE_ACK，关闭使用 `close()`。通信期限为绝对寿命与空闲期限中较早者；每次使用及认证完成后检查硬期限，定时器在没有 API 调用时也释放过期会话。READY 计入报文与字节预算。
 
-进入寿命的轮换提前区间后状态为 DRAINING，允许已登记 UUID 的响应与排空，不接纳新请求。`rotate(outbound_session)` 建立全新握手后将原会话排空；新会话供调用者切换，新旧密钥、ID 和计数独立。轮换失败不延长旧期限；入站轮换由对端发起新连接。到达硬期限即关闭。
+进入寿命的轮换提前区间后状态为 DRAINING，允许已登记 UUID 的响应与排空，不接纳新请求。`rotate(outbound_session)` 建立新握手后将原会话排空；有效恢复窗口内可恢复，否则完整认证。新旧密钥、ID 和计数独立，恢复会话也受原凭据到期时间约束。轮换失败不延长旧期限；入站轮换由对端发起新连接。到达硬期限即关闭。
 
 `close()` 发出认证 CLOSE，等待认证 CLOSE_ACK 或同时关闭，最多等待配置的关闭超时；业务接收循环遇到 CLOSE 时发送 ACK、清理并抛出 `SessionClosedError`，收到预期 CLOSE_ACK 后也使用该类型。它继承 `ProtocolError`，保留现有异常捕获兼容性，消费者应先单独识别正常认证关闭，避免误记为协议拒绝。HEARTBEAT 由 `recv()` 交付，业务接收循环应消费它而不推进分片索引。断连、错误记录、认证失败、预算用尽或取消均清理；`close()` 可重复调用。调用者应先停止 listener 接纳，再关闭 manager，最后等待 listener 完全关闭。
 

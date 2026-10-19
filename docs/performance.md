@@ -1,5 +1,7 @@
 # 性能与 TLS 1.3 对照
 
+当前工具新增 `gm-resume`（持久化恢复）、`gm-pool`（完整握手加池）和 `gm-combined`（恢复加池）三种模式，`gm` 保留每次完整握手。恢复模式预热后的独立握手样本标记 `resumed`，池模式仅改变网关上游连接租用策略；TLS 基线继续禁用票据，报告须明确这一差异。新增测量及实测限制见[恢复验证结果](resumption_results.md)。以下原有三方案方法仍适用于 `gm/tls/plain`。
+
 基准入口为 `python -m test.benchmark.run`，代码只位于 `test/benchmark/`。生产入口使用真实国密安全会话和 DeepSeek provider；本地性能工具注入测试 provider，不访问外部模型。实测汇总见 [性能结果](performance_results.md)，原始数据写入忽略目录 `artifacts/`。
 
 ## 拓扑与身份
