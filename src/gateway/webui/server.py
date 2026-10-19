@@ -84,6 +84,7 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             "app.js": "application/javascript",
             "manual.js": "application/javascript",
             "output.js": "application/javascript",
+            "sessions.js": "application/javascript",
             "markdown-it.min.js": "application/javascript",
             "style.css": "text/css",
         }
@@ -102,6 +103,17 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
         if request.method == "PUT":
             await controller.save(await body(request))
         return web.json_response(controller.configuration())
+
+    async def sessions(request: web.Request) -> web.Response:
+        if controller.role is not PeerRole.GATEWAY:
+            raise ControlError("wrong_role", 404)
+        identity = request.match_info.get("identity")
+        if identity is None:
+            return web.json_response(controller.history.summary())
+        chat = controller.history.conversations.get(identity)
+        if chat is None:
+            raise ControlError("history_expired", 404)
+        return web.json_response(chat.public(detail=True))
 
     async def load(request: web.Request) -> web.Response:
         values = table(await body(request), {"config_path"})
@@ -241,6 +253,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.get("/static/{name}", resource),
             web.get("/api/state", status),
             web.get("/api/config", configuration),
+            web.get("/api/sessions", sessions),
+            web.get("/api/sessions/{identity}", sessions),
             web.put("/api/config", configuration),
             web.post("/api/config/load", load),
             web.post("/api/start", start),

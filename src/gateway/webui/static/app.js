@@ -73,6 +73,9 @@ function render(next) {
   document.querySelectorAll(".adapter-only").forEach(el => {el.hidden = state.role !== "adapter";});
   document.querySelectorAll(".gateway-only").forEach(el => {el.hidden = state.role !== "gateway";});
   document.querySelectorAll(".outbound-only").forEach(el => {el.hidden = state.role === "adapter";});
+  document.querySelectorAll(".gateway-only").forEach(el => {el.hidden = state.role !== "gateway";});
+  GatewaySessions.setRole(state.role);
+  if (state.role !== "gateway") {$("runtime-events").open = true; $("runtime-metrics").open = true;}
   $("config-status").textContent = state.config_loaded ? "身份已加载" : "尚未加载";
   const phase = {stopped:"未启动",starting:"启动中",running:"运行中",stopping:"停止中",failed:"服务失败"};
   $("phase").textContent = state.role === "client" ? (state.busy ? "操作进行中" : "等待操作") : phase[state.phase];
@@ -207,6 +210,6 @@ $("copy").onclick = () => action(async () => {await navigator.clipboard.writeTex
 $("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true); resultStatus("idle");};
 document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
-window.addEventListener("beforeunload", () => {closing = true; socket?.close();});
+window.addEventListener("beforeunload", () => {closing = true; socket?.close(); GatewaySessions.close();});
 ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
 action(async () => {render(await api("state")); fill(await api("config")); connect();});

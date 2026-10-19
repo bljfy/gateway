@@ -15,6 +15,7 @@ from gateway.contracts import InferenceRequest, PeerRole, SecureSession
 from gateway.logging import EventLogger, PrivacyFormatter, set_log_level
 from gateway.runtime import Runtime, RuntimeStatus, run_server
 from gateway.webui.manual import ManualLab, OpenOptions
+from gateway.webui.sessions import SessionHistory
 from gateway.webui.settings import Settings, inspect_settings, load_settings, table, text
 from gateway.webui.simulation import MAX_CLIENTS, MAX_DURATION, MODES, Simulation
 
@@ -69,6 +70,7 @@ class Controller:
         self.handler: EventHandler | None = None
         self.simulation: Simulation | None = None
         self.manual: ManualLab | None = None
+        self.history = SessionHistory()
 
     async def initialize(self) -> None:
         self.handler = EventHandler(self)
@@ -226,7 +228,11 @@ class Controller:
         assert self.runtime is not None
         try:
             await run_server(
-                self.runtime, stop=self.stop_event, ready=ready.set, status=self.status
+                self.runtime,
+                stop=self.stop_event,
+                ready=ready.set,
+                status=self.status,
+                observer=self.history.observe if self.role is PeerRole.GATEWAY else None,
             )
         except asyncio.CancelledError:
             raise

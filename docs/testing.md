@@ -11,6 +11,11 @@
 连接监控与模拟回归位于 `test/integration/test_webui_connections.py`，使用真实本机 GmSSL 和 TCP，不调用模型。覆盖并发连接来源和身份、网关 WebSocket 实时推送、非法帧／握手超时／认证后断开、网关恢复认证、输入与角色限制、停止批次、尚未执行即取消、页面断开及网关停止清理。`test/unit/gateway/test_relay.py` 同时核对连接记录的收发字节和正文隔离。
 
 2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成此功能回归：完整非 e2e 测试 437 项通过、5 项 Linux bootstrap 用例跳过、1 项外部模型用例排除，耗时 101.68 秒；Ruff check、format --check（src/test/scripts）、mypy（src/scripts）、前端语法和既有 27 个展示场景通过。浏览器实测五条正常认证连接逐条显示、停止后释放，以及五条非法协议帧连接被拒绝并保留近期记录。JUnit 为本地忽略目录 `artifacts/connections-junit.xml`。未运行 Linux、外部模型或长时间负载验收；独立 diff 审查未发现阻断问题。
+网关会话回归新增 `test/unit/application/test_session_history.py`，覆盖普通响应 22 字节头跨记录、逐字节 Unicode、同 UUID 不同连接隔离、正在执行／完成／关闭状态、取消后的部分输出、正文限额和历史淘汰。`test/integration/test_webui.py` 通过真实国密双链路验证会话摘要不含正文、详情普通／流式正文、实时增量与断开历史、角色限制及过期记录 404。详情接口沿用统一 Host、Origin 和请求标识中间件。
+
+`node test/frontend/test_sessions.cjs` 使用最小 DOM 替身验证历史正文未变化时不重建节点（保留选区／焦点）、正文变化时重绘、关闭弹窗停止读取正文、重新打开更新内容，以及连接记录淘汰后仍显示对话所属身份。
+
+2026-10-19 在 Windows / Python 3.12.11 / GmSSL 3.1.1 执行会话视图改动的完整非 e2e 回归：430 项通过，5 项 Linux bootstrap 因未配置 Git Bash 跳过，1 项外部模型用例排除；Ruff check、format --check、mypy 与前端 Markdown 27 场景通过。浏览器使用合成记录验证在线／历史聊天、Markdown、已断开列表及从连接详情调出对话；未调用真实模型。回环网络在沙箱内挂起，完整回归在宿主环境执行；JUnit 产物为 `artifacts/webui-sessions-junit.xml`。未验证 Linux 和移动设备实机。
 
 Markdown 与元数据展示的前端回归使用 `node test/frontend/test_output.cjs`，无需 npm 安装。覆盖普通／流式、多处分片及逐字符首行、无换行 JSON、取消／失败时部分前缀、标题列表表格代码、危险 HTML／链接与图片外联。Node 仅为此独立开发测试提供 JavaScript 运行时，不是部署依赖。
 

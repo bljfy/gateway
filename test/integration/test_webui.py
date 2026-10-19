@@ -137,6 +137,16 @@ async def test_real_three_ui_roundtrip_context_uuid_privacy_and_restart(uis, str
         assert adapter["model_verified"] is True
         _, gateway = await uis.api("gateway", "state")
         assert gateway["metrics"]["requests_completed_total"] == 1
+        code, sessions = await uis.api("gateway", "sessions")
+        assert code == 200 and len(sessions["conversations"]) == 1
+        chat = sessions["conversations"][0]
+        code, detail = await uis.api("gateway", "sessions/" + chat["id"])
+        assert code == 200 and detail["prompt"] == prompt
+        assert detail["output"] == output and detail["phase"] == "ok"
+        assert marker not in json.dumps(sessions)
+        assert (await uis.api("client", "sessions"))[0] == 404
+        assert (await uis.api("adapter", "sessions"))[0] == 404
+        assert (await uis.api("gateway", "sessions/missing"))[0] == 404
         # 第二个页面只收到状态和脱敏事件，业务输出不能广播。
         observed = []
         try:
@@ -266,6 +276,10 @@ async def test_partial_stream_cancellation_timeout_and_cleanup(uis, ending, monk
     async with asyncio.timeout(5):
         while (await ws.receive_json())["type"] != "output":
             pass
+    _, sessions = await uis.api("gateway", "sessions")
+    chat = sessions["conversations"][0]
+    _, detail = await uis.api("gateway", "sessions/" + chat["id"])
+    assert detail["phase"] == "running" and "partial-🙂" in detail["output"]
     assert (await uis.api("client", "infer", "POST", {"owner": owner, "prompt": "other"}))[0] == 409
     _, config = await uis.api("client", "config")
     assert (await uis.api("client", "config", "PUT", config["settings"]))[0] == 409
@@ -286,6 +300,14 @@ async def test_partial_stream_cancellation_timeout_and_cleanup(uis, ending, monk
         while uis.clients["adapter"].app[CONTROLLER].status.adapter.inflight:
             await asyncio.sleep(0.02)
     assert (await uis.api("gateway", "state"))[1]["phase"] == "running"
+    async with asyncio.timeout(5):
+        while True:
+            _, sessions = await uis.api("gateway", "sessions")
+            if all(item["phase"] == "closed" for item in sessions["connections"]):
+                break
+            await asyncio.sleep(0.02)
+    _, detail = await uis.api("gateway", "sessions/" + chat["id"])
+    assert detail["phase"] != "running" and "partial-🙂" in detail["output"]
 
 
 @pytest.mark.asyncio
