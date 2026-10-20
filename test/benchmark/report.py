@@ -31,7 +31,7 @@ def render(data, digest, report_date=None):
         f"环境：{env['platform']}；{env['cpu']}；{env['logical_cpus']} 逻辑核；"
         f"Python {env['python']}；{env['openssl']}；GmSSL 3.1.1/绑定 2.2.2。",
         "",
-        f"来源基准：`{env['source_sha']}`，测量工具为本次新增实现；"
+        f"来源基准：`{env['source_sha']}`，实际测量文件 SHA256 保存在原始 JSON；"
         f"锁文件 SHA256：`{env['lock_sha256']}`。",
         "",
         f"原始数据：`{env['command']['output']}`，SHA256：`{digest}`。"
@@ -43,8 +43,9 @@ def render(data, digest, report_date=None):
         "TCP、安全 READY 和总初始化分别按同一连接测量。以下时延单位为 ms；"
         "安全区间包含身份验证、调度与应用确认。失败另计。",
         "",
-        "| 方案 | 审计 | 段 | 成功/失败 | TCP 均值 | 安全均值 | 总均值 | 总 P95 | 总 P99 |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| 方案 | 审计 | 段 | 成功/失败 | 实际恢复 | TCP 均值 | 安全均值 |"
+        " 总均值 | 总 P95 | 总 P99 |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for group in data["handshakes"]:
         for hop in ("A", "B"):
@@ -57,6 +58,7 @@ def render(data, digest, report_date=None):
             total = distribution([r["secure_open_ms"] for r in rows])
             lines.append(
                 f"| {group['mode']} | {group['audit']} | {hop} | {len(rows)}/{failed} | "
+                f"{sum(bool(r.get('resumed')) for r in rows)} | "
                 f"{tcp['mean_ms']:.3f} | {secure['mean_ms']:.3f} | {total['mean_ms']:.3f} | "
                 f"{total['p95_ms']:.3f} | {total['p99_ms']:.3f} |"
             )
@@ -154,12 +156,17 @@ def render(data, digest, report_date=None):
         "",
         "## 结论范围",
         "",
-        "结果代表当前三进程回环实现，包括每次业务的上游握手。"
+        "结果代表当前三进程回环实现；完整握手模式每次业务新建上游会话，"
+        "resume 模式允许会话恢复，pool 模式复用上游连接，combined 同时启用两者。"
+        "恢复样本和池命中由证据检查确认。"
         "TLS 与国密身份、协议往返和运行路径不同，不能将速度差异归因于单一算法。"
         "高并发超过吞吐峰值时应按资源和时延设置容量，而非仅提高连接上限。",
         "",
         "测量未记录后台负载隔离或固定 CPU 频率的证据。"
         "结果包含时间变化与测量工具开销，需在受控目标环境重复验证。",
+        "矩阵负载进程累计保留前序原始样本，RSS 不用于跨方案内存优劣结论。"
+        "国密恢复使用加密持久化存储，TLS 恢复使用进程内 SSLSession 缓存；"
+        "两者存储、身份与协议安全性质仍不同。",
         "",
         f"本次运行命令指定 {env['command']['rounds']} 轮；"
         "本机结果不能证明 Linux、真实模型/跨主机及生产容量。"

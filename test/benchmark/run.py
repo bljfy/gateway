@@ -28,7 +28,7 @@ from gateway.server.relay import GatewayServer
 from gateway.session import LocalIdentity, SecuritySession, SecuritySessionManager, TrustRecord
 from gateway.session.protection import restricted
 from gateway.session.store import ResumptionStore
-from test.benchmark.transport import TransportManager, certificates
+from test.benchmark.transport import TransportManager, TransportPool, certificates
 from test.fixtures.mock_provider import MockProvider
 
 
@@ -118,10 +118,13 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
     gateway = GatewayServer(
         mgr,
         GatewayConfig(
-            identities["adapter"][0].peer, pool_enabled=mode in {"gm-pool", "gm-combined"}
+            identities["adapter"][0].peer,
+            pool_enabled=mode in {"gm-pool", "gm-combined", "tls-pool", "tls-combined"},
         ),
         audit,
     )
+    if mode in {"tls-pool", "tls-combined"}:
+        gateway.pool = TransportPool(mgr, gateway.config, gateway.metrics)
     adapter = Echo()
     audit_path = directory / f"{mode}-{audit_on}-{role}-audit.jsonl"
     log = audit_path.open("w", encoding="utf-8")
@@ -146,7 +149,7 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
             owned.discard(task)
 
     kwargs = {}
-    if mode == "tls":
+    if mode.startswith("tls"):
         kwargs = {"ssl": mgr.server_context, "ssl_handshake_timeout": 5}
     listener = await asyncio.start_server(handle, "127.0.0.1", 0, **kwargs)
     pipe.send(listener.sockets[0].getsockname()[1])
@@ -178,9 +181,11 @@ async def server(mode, role, identities, directory, upstream_port, manifest, aud
                 "audit_healthy": audit.healthy if audit_on else True,
                 "audit_rejected": audit.rejected if audit_on else 0,
                 "active_sessions": len(mgr._sessions if mode.startswith("gm") else mgr.sessions),
-                "security_counts": mgr.session_counts() if mode.startswith("gm") else {},
+                "security_counts": mgr.session_counts()
+                if mode.startswith("gm")
+                else dict(mgr.handshakes),
                 "pool_counts": gateway.metrics.snapshot(None) if role == "gateway" else {},
-                "cipher_suites": sorted(mgr.negotiated) if mode == "tls" else [],
+                "cipher_suites": sorted(mgr.negotiated) if mode.startswith("tls") else [],
                 "open_errors": [
                     {"type": key[0], "winerror": key[1], "errno": key[2], "count": value}
                     for key, value in mgr.open_errors.items()
@@ -542,11 +547,30 @@ def acceptance_problems(output, *, formal=False):
             rows = [row for row in group["samples"] if row["hop"] == hop]
             if len(rows) != command["handshakes"] or any(row["error"] for row in rows):
                 problems.append("handshake failure or insufficient count")
+            mode = group.get("mode", "")
+            if mode in {"gm-resume", "gm-combined", "tls-resume", "tls-combined"}:
+                if not rows or not all(row.get("resumed") for row in rows):
+                    problems.append("resumption not demonstrated")
+            elif any(row.get("resumed") for row in rows):
+                problems.append("unexpected resumed handshake")
     if len(output["shutdown"]) != expected_groups * 2:
         problems.append("missing shutdown evidence")
     for row in output["shutdown"]:
         if not row["audit_healthy"] or row["audit_rejected"] or row["active_sessions"]:
             problems.append("unhealthy audit or remaining sessions")
+    for mode in set(command["modes"]) & {"gm-pool", "gm-combined", "tls-pool", "tls-combined"}:
+        for round_number in range(command["rounds"]):
+            for audit_on in command["audit"]:
+                matches = [
+                    row
+                    for row in output["shutdown"]
+                    if row.get("mode") == mode
+                    and row.get("round") == round_number
+                    and row.get("audit") == audit_on
+                    and row.get("pool_counts", {}).get("pool_hit_total", 0) > 0
+                ]
+                if not matches:
+                    problems.append("connection reuse not demonstrated")
     expected_audits = command["rounds"] * len(command["modes"]) * command["audit"].count(1)
     if len(output["audit_evidence"]) != expected_audits:
         problems.append("missing audit evidence")
@@ -566,7 +590,15 @@ def acceptance_problems(output, *, formal=False):
         command["handshakes"] < 100
         or command["requests"] < 1000
         or command["seconds"] < 30
-        or not {"gm", "tls"}.issubset(command["modes"])
+        or not any(
+            {gm, tls}.issubset(command["modes"])
+            for gm, tls in (
+                ("gm", "tls"),
+                ("gm-resume", "tls-resume"),
+                ("gm-pool", "tls-pool"),
+                ("gm-combined", "tls-combined"),
+            )
+        )
         or set(command["sizes"]) != {1024, 16384}
         or set(command["concurrency"]) != {1, 10, 50, 100}
         or set(command["audit"]) != {0, 1}
@@ -583,7 +615,17 @@ def main():
     parser.add_argument(
         "--modes",
         nargs="+",
-        choices=["gm", "gm-resume", "gm-pool", "gm-combined", "tls", "plain"],
+        choices=[
+            "gm",
+            "gm-resume",
+            "gm-pool",
+            "gm-combined",
+            "tls",
+            "tls-resume",
+            "tls-pool",
+            "tls-combined",
+            "plain",
+        ],
         default=["gm", "tls", "plain"],
     )
     parser.add_argument("--sizes", nargs="+", type=int, default=[1024, 16384])

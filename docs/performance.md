@@ -1,6 +1,23 @@
 # 性能与 TLS 1.3 对照
 
-当前工具新增 `gm-resume`（持久化恢复）、`gm-pool`（完整握手加池）和 `gm-combined`（恢复加池）三种模式，`gm` 保留每次完整握手。恢复模式预热后的独立握手样本标记 `resumed`，池模式仅改变网关上游连接租用策略；TLS 基线继续禁用票据，报告须明确这一差异。新增测量及实测限制见[恢复验证结果](resumption_results.md)。以下原有三方案方法仍适用于 `gm/tls/plain`。
+当前工具支持四组对应模式：`gm/tls` 完整握手、`gm-resume/tls-resume` 会话恢复、`gm-pool/tls-pool` 完整握手加连接池，以及 `gm-combined/tls-combined` 恢复加池。恢复模式预热后的独立握手样本必须全部标记 `resumed`，池模式必须提供实际池命中，否则证据检查失败。历史实验见[恢复验证结果](resumption_results.md)，更新基线的重测见[TLS 基线重测](tls_baseline_results.md)。
+
+## 更新后的 TLS 基线
+
+TLS 四种模式均使用同一 TLS 1.3 双向证书认证、P-256 配置及 `TLS_AES_256_GCM_SHA384` 套件，不发送 0-RTT。`tls` 与 `tls-pool` 禁用票据并拒绝恢复。`tls-resume` 与 `tls-combined` 允许服务器发出 NewSessionTicket；客户端读取认证 READY、处理票据后缓存 `SSLSession`，后续通过上下文的公开 `wrap_bio(..., session=...)` 接口向 OpenSSL 提供会话。没有修改 asyncio 私有实现或全局 SSL 方法。
+
+缓存只属于单个对端和 SSLContext，进程退出后丢失；客户端自完整握手起最多使用 1800 秒，恢复不延长本地窗口。服务器票据寿命仍由 OpenSSL 管理，不将此测试适配器称为完整的生产撤销或持久化方案。国密恢复包含加密 SQLite 与 DPAPI 存储开销，TLS 恢复仅使用进程内缓存；本次对齐的是连接优化策略，存储与协议安全性质仍有差异。每次新连接均检查预期对端身份，客户端接收服务端认证完成后发送的 READY，记录实际 `session_reused`；票据缺失或失效时允许 OpenSSL 执行完整握手。
+
+TLS 池使用相同 `UpstreamPool` 容量、独占租用、等待截止、空闲回收及成功归还逻辑。测量专用子类补充对 TCP 健康、会话寿命、方向记录与字节预算的租用检查，采用相同默认策略与保守响应预留；连接复用不断号，异常后不重试业务。TLS 测量适配器仍不实现国密协议的全部主动定时清理、动态信任、撤销及认证关闭策略。
+
+主对照重测使用以下命令，保留既有完整握手及历史报告：
+
+```powershell
+uv run --locked python -m test.benchmark.run --manifest .tools/gmssl/manifest.json --modes gm-combined tls-combined --rounds 1 --handshakes 100 --requests 1000 --seconds 30 --output artifacts/tls-baseline-matched.json
+uv run --locked python -m test.benchmark.report artifacts/tls-baseline-matched.json --markdown docs/tls_baseline_results.md --csv artifacts/tls-baseline-matched.csv --date 2026-10-21
+```
+
+该配置覆盖两方案、两种载荷、1/10/50/100 并发、普通/流式及审计开关，共 64 档。一次完整运行至少需要约 32 分钟负载时间，另加初始化和握手。判定同时检查预算、实际恢复、池命中、资源采样、审计及停机；单轮通过仍不等于多轮稳定性或生产验收。下文三方案拓扑与旧命令描述对应完整握手模式，池模式仅在需要新建上游连接时握手。
 
 基准入口为 `python -m test.benchmark.run`，代码只位于 `test/benchmark/`。生产入口使用真实国密安全会话和 DeepSeek provider；本地性能工具注入测试 provider，不访问外部模型。实测汇总见 [性能结果](performance_results.md)，原始数据写入忽略目录 `artifacts/`。
 
@@ -8,7 +25,7 @@
 
 客户端、网关、adapter 分别位于三个独立进程，通过 IPv4 回环 TCP 连接。三个方案复用 `InferenceClient`、`GatewayServer`、业务编解码、分片与 `AdapterServer.serve`。测试目录中的 Echo provider 立即回显原提示词，不调用 DeepSeek。提示词与输出分别为精确 1024 或 16384 个 ASCII 字节。普通响应另外包含业务编码，流式输出使用现有的 256 字符分片。
 
-每个客户端连接只有一个在途业务；同一档使用指定数量的独立客户端连接。网关每次请求重新建立并关闭上游会话，所有方案保持一致。主结果包含上游重新握手成本，不能当作连接池或单纯密码算法速度。
+每个客户端连接只有一个在途业务；同一档使用指定数量的独立客户端连接。完整握手模式网关每次请求重新建立并关闭上游会话；恢复模式新建连接时允许恢复，池模式复用健康上游连接。仅比较相同连接策略的配对模式，结果不能当作单纯密码算法速度。
 
 | 方案 | 身份与保护 | 连接设置 |
 | --- | --- | --- |

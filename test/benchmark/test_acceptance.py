@@ -106,3 +106,18 @@ async def test_failed_child_does_not_skip_other_cleanup():
         await stop_services(services)
     assert stopped == ["adapter", "gateway"]
     assert joined == closed == ["gateway", "adapter"]
+
+
+def test_resumption_and_pool_must_be_proven():
+    data = evidence()
+    data["environment"]["command"]["modes"] = ["tls-combined"]
+    data["handshakes"][0]["mode"] = "tls-combined"
+    assert "resumption not demonstrated" in acceptance_problems(data)
+    assert "connection reuse not demonstrated" in acceptance_problems(data)
+    for row in data["handshakes"][0]["samples"]:
+        row["resumed"] = True
+    data["shutdown"] = [dict(row) for row in data["shutdown"]]
+    data["shutdown"][0].update(
+        mode="tls-combined", round=0, audit=1, pool_counts={"pool_hit_total": 1}
+    )
+    assert not acceptance_problems(data)

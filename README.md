@@ -111,6 +111,7 @@ sequenceDiagram
 - [安全协议](docs/protocol.md)：国密记录与原生环境。
 - [开发指南](docs/developer_guide.md)、[依赖管理](docs/dependencies.md)、[测试规范](docs/testing.md)。
 - [整合报告](docs/integration_report.md)与[性能说明](docs/performance.md)：历史证据和当前验证边界。
+- [TLS 基线重测](docs/tls_baseline_results.md)：国密与 TLS 同时启用会话恢复和连接池的 64 档实测。
 - [Agent 入口](AGENT.md)：工程规范。
 
 源码位于 `src/gateway/`：`client/` 为用户业务客户端，`server/` 为网关，`adapter/server.py` 为安全模型适配器，`adapter/provider.py` 定义供应商接口，`adapter/deepseek.py` 调用 SDK，`runtime.py` 与 `cli.py` 管理配置和生命周期。密码与安全会话位于 `crypto/`、`protocol/`、`session/`。确定性业务替身仅位于 `test/`。

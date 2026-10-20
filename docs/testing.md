@@ -95,6 +95,10 @@ $env:PATH = (Split-Path -Parent $manifest.library) + ';' + $env:PATH
 
 `test/benchmark/test_transport.py` 使用临时证书与真实本机 TLS，验证双向身份、缺失证书、错误证书及错误目标身份的拒绝行为，随本地回归执行。长时间负载不加入日常 pytest，单独执行 `python -m test.benchmark.run`；复现命令、完整矩阵与统计限制见 [性能对照](performance.md)。
 
+TLS 基线补充四种连接模式的真实认证回归：完整握手后连续两次连接核对双方 `session_reused`，缓存截止后重新完整握手，已有缓存时错误目标名称仍被拒绝，设置 `SSLKEYLOGFILE` 仍不产生密钥日志。同时检查池租用的寿命、记录及字节预算，恢复与池命中缺失会被证据检查拒绝。TLS 基线重测结果见[更新报告](tls_baseline_results.md)。
+
+2026-10-21，Windows / Python 3.12.11 / OpenSSL 3.5.3 / GmSSL 3.1.1：完整非外部回归 541 通过、6 平台相关跳过、1 外部模型用例排除，176.08 秒；出现一条 pytest 缓存目录权限警告，不影响用例和 JUnit 输出。报告为 `artifacts/tls-baseline-regression.xml`。Ruff check、format --check（src/test/scripts）及 mypy（src/scripts，41 文件）通过。国密恢复存储需要真实账户 DPAPI，沙箱下的初次混合冒烟因初始化失败中止，保留为 `artifacts/tls-baseline-smoke.json`；随后使用实际账户完成 40 档短预算冒烟，证据检查通过，报告为 `artifacts/tls-baseline-smoke-host.json`。正式配对重测 64 档、1371209 次成功、0 次业务失败，800 个预热后握手均实际恢复，预算、采样、审计与停机检查通过。此次没有运行 Linux、真实模型、跨主机或多轮长期稳定性验收。
+
 样例数据记录来源或生成脚本、生成种子和预期结果，保证可复用。密码材料及报告字段遵循上述验收设计，大体积产物记录存储位置及校验值。
 
 CI 报告保存要求见 [CI/CD 规范](ci_cd.md)。pytest 用法参考 [官方文档](https://docs.pytest.org/en/stable/getting-started.html)。
