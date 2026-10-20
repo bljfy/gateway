@@ -45,7 +45,7 @@ $env:PATH = (Split-Path -Parent $nativeManifest.library) + ';' + $env:PATH
 
 完整 bootstrap 会读取该清单并设置测试进程的加载路径。原生库必须在进程首次导入绑定前完成配置；后端检查文件哈希、绑定版本、原生版本与实际加载路径，不允许进程中途切换不同原生库。
 
-Linux 使用同一构建模块，设置 `GMSSL_LIBRARY` 为 `.tools/gmssl/lib/libgmssl.so.3.1` 的绝对路径，`GMSSL_SHA256` 来自清单，`LD_LIBRARY_PATH` 首项为该库所在目录。模块核查 `/proc/self/maps` 中实际映射的库。当前 Windows/Linux 构建及回归证据见[恢复验证结果](resumption_results.md)；MSVC 构建及本次远端 CI 尚未验收，不以本地结果代替远端状态。
+Linux 使用同一构建模块，设置 `GMSSL_LIBRARY` 为 `.tools/gmssl/lib/libgmssl.so.3.1` 的绝对路径，`GMSSL_SHA256` 来自清单，`LD_LIBRARY_PATH` 首项为该库所在目录。模块核查 `/proc/self/maps` 中实际映射的库。本轮 Windows 验证和未执行的 Linux 范围见[测试报告](integration_report.md)；MSVC 构建及本次远端 CI 尚未验收，不以本地结果代替远端状态。
 
 ## 密码编码与密钥提供
 
@@ -107,8 +107,6 @@ manager 限制活跃及待建立总量、待建立量和密码执行并发。密
 
 ## 验证记录
 
-2026-10-05 在上述 Windows 环境从固定源码重建原生库，原生 SM2、SM3、SM4 测试 3/3 通过。重建 DLL SHA256 为 `1bec8a0f350bebe998b729bee1c03dabbf3fc84433597fcd765340299b89a0e4`；这是本次构建产物的记录，不是跨环境固定二进制哈希。
+当前安全测试位于 `test/unit/security_core/`，覆盖 SM3 已知答案、[SM4-GCM 向量](https://www.rfc-editor.org/rfc/rfc8998.html#appendix-A.1)、独立 HMAC-SM3 对照、SM2 身份签名、v2 密钥材料、恢复存储，以及握手、记录认证、重放、期限、预算、轮换与异常清理。2026-10-21 的 Windows 回归中该目录 93 项通过、1 项 POSIX 权限测试跳过；本轮使用 DLL SHA256 `9df4ccb9fd007dac248034e36b69510d030ddc6e1c4736ce36e6c5427ed12689`。
 
-安全单元测试在 `test/unit/security_core/`：SM3 已知答案、[RFC 8998 A.1 SM4-GCM 向量](https://www.rfc-editor.org/rfc/rfc8998.html#appendix-A.1)、独立 HMAC-SM3 对照、SM2 signer ID/错误公钥、72 字节加密、加密私钥存储，以及本地 TCP 正常通信、篡改、重放、跨会话、反射、并发序号、时间与预算、轮换、关闭、取消、容量与碰撞清理。载荷由测试构造，密钥每次使用真实安全随机源生成。
-
-pytest 生成 `artifacts/security-core.json`，记录每个用例编号、输入摘要、修改位置、步骤、预期、实际状态、耗时与判定；完整命令生成 `artifacts/junit.xml`。A 分支基于 `3516243` 独立验证时全仓库 94 项非外部测试通过，其中安全核心 71 项；Ruff、格式检查、mypy 与完整 Windows bootstrap 通过。独立审查结果见交付说明。当前验证是 A 线单链路验证，尚未完成三程序、双链路业务、隐私审计、100 次性能实验、TLS 对照、部署与回滚验收。
+双链路、三进程、审计及国密/TLS 对照的当前结果统一见[测试报告](integration_report.md)。用例使用合成载荷与随机密钥，JSON 记录步骤、输入摘要、预期及判定，JUnit 保存执行结果；这些测试不代表协议合规认证或生产验收。

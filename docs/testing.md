@@ -1,110 +1,66 @@
 # 测试规范
 
-最近一次本地回归的分类统计与真实用例样例见[测试总览](testing-dashboard.html)。页面是 2026-10-18 JUnit 快照的静态展示；执行步骤、平台边界和历史结果以本规范及整合报告为准。
+当前结果见[测试报告](integration_report.md)和[测试总览](testing-dashboard.html)。本页维护测试方法与运行命令，性能方法见[性能测量](performance.md)。
 
-## WebUI 验证
+## 组织与隔离
 
-手动实验回归位于 `test/integration/test_webui_manual.py`，通过真实 GmSSL 和本机 TCP 验证协商密钥恢复、自定义发送密钥失败、头部／密文／标签翻转、序号／会话／方向／nonce／控制字段错误、真实反射、同连接及跨会话重放、双向握手篡改、旧 ClientKey 重放、替代私钥与公钥、身份／版本／信任失效，以及输入边界、页面归属、提前取消、实验时限、页面断开和中继清理。测试使用合成材料，核对原身份文件不变、正文／密钥不进入快照，异常不触发模型调用。
+使用 pytest，测试位于 `test/`，文件名为 `test_*.py`，用例名为 `test_*`，共享夹具放在 `conftest.py`。新增功能覆盖正常与异常路径，修复缺陷增加复现回归；用临时目录隔离身份、存储和配置，不依赖执行顺序。
 
-2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成手动实验验证：新增 39 项针对性测试通过；修复独立审查发现的清理过程重复取消竞态后，最终完整非 e2e 回归 476 项通过、5 项 Linux bootstrap 跳过、1 项外部模型用例排除，耗时 145.28 秒。Ruff check、format --check、mypy、两份前端脚本语法及既有 27 个展示场景通过。浏览器分步验证正常心跳、手动替换 SM4 发送密钥、再次发送后网关认证失败，以及两侧源地址对应；保存界面预览。清理回归在自然超时进入关闭阶段时再次取消，核对密钥缓冲区清空、中继关闭和任务排空；独立复审通过。JUnit 位于本地忽略目录 `artifacts/manual-lab-junit.xml`。本次未验证 Linux、外部模型或长负载。
-
-连接监控与模拟回归位于 `test/integration/test_webui_connections.py`，使用真实本机 GmSSL 和 TCP，不调用模型。覆盖并发连接来源和身份、网关 WebSocket 实时推送、非法帧／握手超时／认证后断开、网关恢复认证、输入与角色限制、停止批次、尚未执行即取消、页面断开及网关停止清理。`test/unit/gateway/test_relay.py` 同时核对连接记录的收发字节和正文隔离。
-
-2026-10-18 在 Windows / Python 3.12.11 / GmSSL 3.1.1 完成此功能回归：完整非 e2e 测试 437 项通过、5 项 Linux bootstrap 用例跳过、1 项外部模型用例排除，耗时 101.68 秒；Ruff check、format --check（src/test/scripts）、mypy（src/scripts）、前端语法和既有 27 个展示场景通过。浏览器实测五条正常认证连接逐条显示、停止后释放，以及五条非法协议帧连接被拒绝并保留近期记录。JUnit 为本地忽略目录 `artifacts/connections-junit.xml`。未运行 Linux、外部模型或长时间负载验收；独立 diff 审查未发现阻断问题。
-网关会话回归新增 `test/unit/application/test_session_history.py`，覆盖普通响应 22 字节头跨记录、逐字节 Unicode、同 UUID 不同连接隔离、正在执行／完成／关闭状态、取消后的部分输出、正文限额和历史淘汰。`test/integration/test_webui.py` 通过真实国密双链路验证会话摘要不含正文、详情普通／流式正文、实时增量与断开历史、角色限制及过期记录 404。详情接口沿用统一 Host、Origin 和请求标识中间件。
-
-`node test/frontend/test_sessions.cjs` 使用最小 DOM 替身验证历史正文未变化时不重建节点（保留选区／焦点）、正文变化时重绘、关闭弹窗停止读取正文、重新打开更新内容，以及连接记录淘汰后仍显示对话所属身份。
-
-2026-10-19 在 Windows / Python 3.12.11 / GmSSL 3.1.1 执行会话视图改动的完整非 e2e 回归：430 项通过，5 项 Linux bootstrap 因未配置 Git Bash 跳过，1 项外部模型用例排除；Ruff check、format --check、mypy 与前端 Markdown 27 场景通过。浏览器使用合成记录验证在线／历史聊天、Markdown、已断开列表及从连接详情调出对话；未调用真实模型。回环网络在沙箱内挂起，完整回归在宿主环境执行；JUnit 产物为 `artifacts/webui-sessions-junit.xml`。未验证 Linux 和移动设备实机。
-
-Markdown 与元数据展示的前端回归使用 `node test/frontend/test_output.cjs`，无需 npm 安装。覆盖普通／流式、多处分片及逐字符首行、无换行 JSON、取消／失败时部分前缀、标题列表表格代码、危险 HTML／链接与图片外联。Node 仅为此独立开发测试提供 JavaScript 运行时，不是部署依赖。
-
-新增 `test/unit/application/test_webui.py` 与 `test/integration/test_webui.py`，测试本地 HTTP／WebSocket 控制接口、Host／Origin／请求标识、配置旁文件恢复、字段和角色拒绝、认证失败、端口占用、普通／流式 Unicode 与检索片段、UUID、输出隔离、生命周期及取消清理。测试身份运行时生成，模型使用回环 SDK API 或 test/ 内 provider；不调用真实模型。
-
-```powershell
-uv run --locked pytest test/unit/application/test_webui.py test/integration/test_webui.py -m "not e2e"
-```
-
-先按下文配置已校验 GmSSL 环境。集成测试包含页面断开时 HTTP handler 再次取消的清理回归、协程尚未开始时取消、凭据缺失、WebSocket 容量及 HTTP 请求大小限额。浏览器验收使用三个独立 WebUI CLI 进程和回环模型替身，检查配置保存、认证、普通／流式结果、部分输出取消、复制／清空、非法端口提示及网关／adapter 重启。实测结果与平台限制见 [WebUI 补充验证](integration_report.md#webui-补充验证)。
-
-## Adapter 验证
-
-当前角色链路为 client→gateway→adapter。普通本地回归使用真实 GmSSL 和注入的测试 provider；CLI 与 SDK 测试使用 test/fixtures/model_api.py 提供的回环 HTTP/SSE，合成凭据由测试夹具设置并隔离环境代理。它们验证模型接口接线、取消与安全链路，不证明 DeepSeek 远端服务可用。
-
-test/unit/application/test_deepseek.py 验证真实 SDK 参数映射、检索顺序、Unicode 流、空增量、唯一最终片、错误响应、断流、输出限额、超时和关闭清理。test/integration/ 覆盖双链路及三进程 adapter/demo；认证失败、篡改及重放检查 provider 调用次数。
-
-真实模型请求继续使用 e2e 标记，必须明确授权后执行；默认回归不因真实密钥存在而联网调用模型。历史回归记录保持原测试版本和统计，当前验证结果另行追加。
-
-获授权并配置模型凭据后，可执行 `uv run --locked pytest test/integration/test_model_e2e.py -m e2e`，以合成提示词验证一次普通请求和一次流式请求，各使用 32 token 上限。
-
-2026-10-14 在 Windows x86_64 / Python 3.12.11 / GmSSL 3.1.1 / openai 3.31.0 执行完整非 e2e 回归：388 项通过、5 项 Linux bootstrap 因未配置 Git Bash 跳过、1 项外部模型测试排除。Ruff check、format --check（src/test/scripts）、mypy（src/scripts）及 diff 空白检查通过。JUnit 位于本地忽略目录 artifacts/adapter-junit.xml，包含真实双国密链路、三进程 CLI 与本地模型 API。此次未验证 Linux 或真实 DeepSeek 远端。
-
-## 配置与组织
-
-2026-10-14 在 Windows x86_64 / Python 3.12.11 / GmSSL 3.1.1 整合既有三角色 WebUI 与一键启动入口：完整非 e2e 回归 429 项通过、5 项 Linux bootstrap 用例因未配置 Git Bash 跳过、1 项外部模型测试排除；Ruff、format、mypy、PowerShell 语法及前端 27 个展示场景通过。新增启动测试使用三个独立 WebUI 进程和本地模型 API，验证普通／流式推理、业务端口冲突回滚和停止文件退出后的六端口释放；随后补充 KeyboardInterrupt 清理用例并单独验证。原生 `start.cmd -NoBrowser` 已验证首次生成配置、三控制台与业务服务就绪，以及子进程退出后清理。终端工具未成功传递键盘 Ctrl+C，浏览器自动打开及真实 DeepSeek 请求未在本次验证；KeyboardInterrupt 用例验证异常清理路径。JUnit 保存于本地忽略目录 `artifacts/webui-launcher-junit.xml`。
-
-统一使用 pytest，测试放在 `test/`。首次实现功能前在 `pyproject.toml` 设置 `testpaths = ["test"]`、注册 `e2e` 标记，并通过 [uv](dependencies.md) 添加开发依赖。
-
-- 文件使用 `test_*.py`，函数使用 `test_*`，公共夹具放在 `test/conftest.py`。
-- 单元测试验证模块逻辑，集成测试验证本地客户端、网关与 adapter 的完整交互。
-- 新增功能提供对应测试，修复缺陷增加复现问题的回归测试；关联问题单时在测试附近注释编号。
-- 用参数化覆盖边界及异常输入，用临时目录隔离数据；测试不依赖执行顺序，不污染其他测试。
-- 日常集成测试使用本地模型 API 替身或注入 provider、运行时生成的测试密钥及合成数据。
-
-## 执行与判定
-
-新增或修改测试文件后先运行对应文件中的已授权测试，修复测试或实现直到通过：
-
-```powershell
-uv run --locked pytest test/test_session.py -m "not e2e"
-```
-
-代码交付前执行完整的非外部端到端测试：
-
-```powershell
-uv run --locked pytest test/ -m "not e2e"
-```
-
-需要真实外部服务、凭据或费用的测试标记为 `e2e`，仅在用户明确授权后单独执行，不因环境变量存在自动启用。记录未执行用例及原因，不将跳过或空测试视为通过。
+默认回归使用随机测试密钥、合成业务输入、注入 provider 或 `test/fixtures/model_api.py` 的回环 HTTP/SSE，不访问外部模型。真实外部服务、凭据或费用相关测试标记 `e2e`，只有明确授权后才运行。原生库缺失或校验失败时测试失败，不用跳过替代验证。
 
 ## 本地端到端验证
 
-运行日志回归位于 `test/unit/gateway/test_logging.py`：输入为合成密钥、提示词、嵌套检索片段和输出标记，以及含标记的异常、自由文本、非法元数据和未知配置。判定为五个日志级别均无敏感标记、合法元数据保留、级别阈值正确、非法配置只返回固定错误、CLI 四个入口应用配置且退出恢复 logging 状态。既检查格式化输出，也检查处理器接收的 LogRecord；审计写入不受日志阈值影响。测试不证明密钥销毁或生命周期的完整实现。
-
-2026-10-14 在 Windows / Python 3.12.11 / GmSSL 3.1.1 执行日志改动的全量非 e2e 回归：351 项通过，5 项 Linux bootstrap 用例因未配置 Git Bash 跳过；新增日志用例 45 项通过。Ruff check、format --check、mypy 和 diff 空白检查通过，包含真实双链路和三进程 CLI 验证。测试使用 `--basetemp=.tools/pytest-final` 将临时数据隔离到任务工作区；JUnit 和网关 JSON 报告保存在本地忽略目录。控制台写入失败用合成 OSError 验证固定诊断无敏感信息。
-
-`test/integration/` 使用真实 GmSSL、临时生成的 SM2 身份和回环 TCP，包括三个独立 CLI 进程；属于本地测试，随全量非外部测试执行。必须先配置已校验原生库的 `GMSSL_LIBRARY`、`GMSSL_SHA256` 和加载路径，缺失时集成测试失败，不跳过。原生环境步骤见 [协议说明](protocol.md#原生环境)。
-
-demo 停机检查使用 `socket.create_server` 在原网关、模拟器与指标端口重新监听。POSIX 下该接口设置 SO_REUSEADDR，避免已关闭 TCP 连接的 TIME_WAIT 导致误报；Windows 下使用标准库的默认行为。SO_REUSEPORT 保持关闭，仍有活跃监听器时检查必须失败。正常/阻塞启动和普通/quiet 四组 demo 用例继续核查响应、身份复用、审计与停机。Linux CI [运行 37617741412](https://github.com/bljfy/gateway/actions/runs/37617741412) 原有四项失败均发生在普通 socket 的停机后 bind 检查，而业务调用已成功。
-
-2026-10-14 在 Ubuntu 24.04 / WSL2 / Python 3.12.11 / GmSSL 3.1.1 复现修复前 demo 测试：4 项失败、1 项通过，失败位置与上述 CI 一致。修复后 demo 测试 5 项通过，完整非 e2e 回归 356 项通过、无跳过；Linux Ruff check、format --check（src/test/scripts）、mypy（src/scripts）及 GmSSL 三项原生自测通过。Windows 同版本 Python/GmSSL 的 demo 测试 5 项通过。JUnit 复现、修复及全量报告保存在 `artifacts/linux-ci/`；这是本机验证，远端流水线须在提交推送后运行。
+先完成 bootstrap 并加载已校验 GmSSL。原生库必须在首次导入绑定前配置；完整环境说明见[安全协议](protocol.md#原生环境)。
 
 ```powershell
-$manifest = Get-Content .tools/gmssl/manifest.json -Raw | ConvertFrom-Json
-$env:GMSSL_LIBRARY = $manifest.library
-$env:GMSSL_SHA256 = $manifest.sha256
-$env:PATH = (Split-Path -Parent $manifest.library) + ';' + $env:PATH
+$nativeManifest = Get-Content .tools/gmssl/manifest.json -Raw | ConvertFrom-Json
+$env:GMSSL_LIBRARY = $nativeManifest.library
+$env:GMSSL_SHA256 = $nativeManifest.sha256
+$env:PATH = (Split-Path -Parent $nativeManifest.library) + ';' + $env:PATH
+.\.tools\uv\uv.exe run --locked ruff check src test scripts
+.\.tools\uv\uv.exe run --locked ruff format --check src test scripts
+.\.tools\uv\uv.exe run --locked mypy src scripts
 .\.tools\uv\uv.exe run --locked pytest test/ -m "not e2e" --junitxml=artifacts/junit.xml
+git diff --check
 ```
 
-覆盖普通/流式 1 KiB、16 KiB、跨 64 KiB 请求，两段独立密钥与会话标识、两段篡改拒绝、重放、错误公钥、过期信任及会话、轮换、提前关闭、超时取消、并发调用串行化，以及小记录跨 UTF-8 字符的恢复。三进程用例同时检查指标、审计泄漏标记和停机退出；两段用例检查捕获的线帧没有合成明文标记，关闭后无遗留会话或原生任务。
+## 执行与判定
 
-合成输入为固定标记与重复字符，UUID 和密钥运行时随机生成。临时私钥及口令由 pytest 临时目录持有，不进入 Git 或报告。`artifacts/integration.json` 只记录用例、步骤、输入生成摘要、故障位置标识、预期、结果与耗时；`artifacts/junit.xml` 为标准测试结果。实测版本、统计和未覆盖范围见 [整合报告](integration_report.md)。
+开发时先运行受影响测试文件，修复后完成非外部回归与静态检查，完整查看失败、警告及跳过原因。跳过项、未执行项和环境限制单独记录，不计为通过。
 
-安全用例、判定证据和 JSON 报告字段见 [实现方案第 11 节](implementation_plan.md#11-测试设计与验收)；性能载荷、握手次数、测量口径及 TLS 对照见 [第 12 节](implementation_plan.md#12-性能实验与公开方案对比)。
+## 验证范围
 
-`test/benchmark/test_transport.py` 使用临时证书与真实本机 TLS，验证双向身份、缺失证书、错误证书及错误目标身份的拒绝行为，随本地回归执行。长时间负载不加入日常 pytest，单独执行 `python -m test.benchmark.run`；复现命令、完整矩阵与统计限制见 [性能对照](performance.md)。
+| 模块 | 主要测试位置 | 检查重点 |
+| --- | --- | --- |
+| 密码与协议 | `test/unit/security_core/` | 已知答案、签名身份、认证解密、握手、序号、期限、预算与清理 |
+| 网关与隐私审计 | `test/unit/gateway/` | 验证后转发、资源限制、日志白名单、审计失败、池租用与回收 |
+| 业务与模型适配 | `test/unit/application/` | 编解码、Unicode、SDK 参数、UUID、流式终止、超时、取消、凭据和 CLI |
+| 双链路与独立进程 | `test/integration/` | 真实 SM2/SM4-GCM TCP、三进程、抓包敏感标记、篡改/重放拒绝和停机 |
+| TLS 与测量证据 | `test/benchmark/` | 双向身份、实际恢复、缓存期限、池预算和损坏证据拒收 |
 
-TLS 基线补充四种连接模式的真实认证回归：完整握手后连续两次连接核对双方 `session_reused`，缓存截止后重新完整握手，已有缓存时错误目标名称仍被拒绝，设置 `SSLKEYLOGFILE` 仍不产生密钥日志。同时检查池租用的寿命、记录及字节预算，恢复与池命中缺失会被证据检查拒绝。TLS 基线重测结果见[更新报告](tls_baseline_results.md)。
-
-2026-10-21，Windows / Python 3.12.11 / OpenSSL 3.5.3 / GmSSL 3.1.1：完整非外部回归 541 通过、6 平台相关跳过、1 外部模型用例排除，176.08 秒；出现一条 pytest 缓存目录权限警告，不影响用例和 JUnit 输出。报告为 `artifacts/tls-baseline-regression.xml`。Ruff check、format --check（src/test/scripts）及 mypy（src/scripts，41 文件）通过。国密恢复存储需要真实账户 DPAPI，沙箱下的初次混合冒烟因初始化失败中止，保留为 `artifacts/tls-baseline-smoke.json`；随后使用实际账户完成 40 档短预算冒烟，证据检查通过，报告为 `artifacts/tls-baseline-smoke-host.json`。正式配对重测 64 档、1371209 次成功、0 次业务失败，800 个预热后握手均实际恢复，预算、采样、审计与停机检查通过。此次没有运行 Linux、真实模型、跨主机或多轮长期稳定性验收。
-
-样例数据记录来源或生成脚本、生成种子和预期结果，保证可复用。密码材料及报告字段遵循上述验收设计，大体积产物记录存储位置及校验值。
-
-CI 报告保存要求见 [CI/CD 规范](ci_cd.md)。pytest 用法参考 [官方文档](https://docs.pytest.org/en/stable/getting-started.html)。
+安全测试同时核查返回、状态、下游调用次数与资源释放，不以“出现错误日志”作为唯一判定。报告不得保存私钥、口令、API Key 或完整敏感业务内容。JSON 记录步骤、合成输入摘要、预期、实际和判定，具体输入及注入动作由测试源码定义；JUnit 记录执行状态与耗时。
 
 ## 恢复存储与连接池验证
 
-`test/unit/security_core/test_resumption.py` 使用真实 GmSSL 和独立 HMAC 对照验证 HKDF、加密落盘、独占文件锁、恢复不续期、独立流量密钥、缓存缺失、过期、身份/策略变化、握手篡改与重放。`test/unit/gateway/test_pool.py` 检查独占租用、容量、等待、取消、空闲回收和停机。`test/integration/test_persistent_sessions.py` 启动两个独立 client 进程，验证磁盘恢复和上游池命中。
+`test/unit/security_core/test_resumption.py` 检查加密落盘、重载、独占锁、过期不续期、密钥独立性、策略绑定、篡改与撤销。`test/unit/gateway/test_pool.py` 检查容量、独占租用、等待、取消、空闲回收及停机。`test/integration/test_persistent_sessions.py` 检查独立客户端进程恢复、池命中和运行中撤销。
 
-Windows 使用实际服务账户运行 DPAPI/ACL 测试，Linux 的秘密测试目录必须位于支持 POSIX 权限的文件系统；WSL 的 Windows 挂载目录不能代替该权限验证。平台结果、已执行矩阵及限制记录在[恢复性能与验证](resumption_results.md)。
+Windows 秘密存储测试使用实际账户的 DPAPI/ACL；Linux 使用支持 POSIX 权限的本地文件系统，WSL 的 Windows 挂载目录不能替代该权限验证。
+
+## WebUI 验证
+
+`test/integration/test_webui.py` 检查本地 HTTP/WebSocket、Host/Origin、角色限制、配置、普通/流式推理、页面输出隔离和取消清理。`test_webui_manual.py` 使用真实安全链路注入篡改、重放、反射和错误参数；`test_webui_connections.py` 检查连接观察、并发模拟及回收。会话详情与有界历史由 `test/unit/application/test_session_history.py` 等覆盖。
+
+独立前端回归使用 Node 内置模块，无需 npm 安装：
+
+```powershell
+node test/frontend/test_output.cjs
+node test/frontend/test_sessions.cjs
+```
+
+浏览器人工验收需另行记录页面操作、输出、隔离和生命周期结果；Python 回归不能代替浏览器渲染检查，Node 回归也不能代替真实国密链路验证。
+
+## 外部模型验证
+
+获得明确授权并配置凭据后，执行 `uv run --locked pytest test/integration/test_model_e2e.py -m e2e`，使用合成提示词检查普通和流式调用。结果必须与本地替身回归分开记录，不因环境变量中存在真实密钥就自动联网。
+
+性能长负载不加入日常 pytest；同一时间只运行一套基准，不同时执行回归或其他负载。复现命令、统计口径和证据判定见[性能测量](performance.md)，CI 产物保存见[CI/CD 规范](ci_cd.md)。

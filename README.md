@@ -99,7 +99,7 @@ sequenceDiagram
 
 ## 文档与源码
 
-2026-10-14 已完成真实 DeepSeek 三进程普通与流式请求复测，核对响应 UUID、成功审计及停机端口释放。首次请求曾失败，根因未确认；此次验证不代表稳定性、长负载或生产验收通过，详情见 [真实三进程验证](docs/integration_report.md#deepseek-真实三进程验证)。
+当前版本测试：541 项回归通过、6 项平台相关跳过；国密与 TLS 均启用恢复和连接池的 64 档负载共完成 1,371,209 次成功请求，0 次业务失败。测试使用本地模型替身，结果、范围与未验证项见[测试报告](docs/integration_report.md)。
 
 - [题目要求与项目实现说明](docs/requirements_solution.md)：五项要求的实现机制、源码、测试证据及性能对照。
 - [实现方案](docs/implementation_plan.md)：架构、安全边界、开发职责与验收。
@@ -110,8 +110,8 @@ sequenceDiagram
 - [部署与迁移](docs/deployment.md)：旧角色配置迁移、凭据和回滚。
 - [安全协议](docs/protocol.md)：国密记录与原生环境。
 - [开发指南](docs/developer_guide.md)、[依赖管理](docs/dependencies.md)、[测试规范](docs/testing.md)。
-- [整合报告](docs/integration_report.md)与[性能说明](docs/performance.md)：历史证据和当前验证边界。
-- [TLS 基线重测](docs/tls_baseline_results.md)：国密与 TLS 同时启用会话恢复和连接池的 64 档实测。
+- [测试报告](docs/integration_report.md)：当前功能、安全、恢复与连接池、TLS 性能对比及未验证项。
+- [测试总览](docs/testing-dashboard.html)、[性能明细](docs/tls_baseline_results.md)与[测量方法](docs/performance.md)：分类结果、全部负载档位和复现步骤。
 - [Agent 入口](AGENT.md)：工程规范。
 
 源码位于 `src/gateway/`：`client/` 为用户业务客户端，`server/` 为网关，`adapter/server.py` 为安全模型适配器，`adapter/provider.py` 定义供应商接口，`adapter/deepseek.py` 调用 SDK，`runtime.py` 与 `cli.py` 管理配置和生命周期。密码与安全会话位于 `crypto/`、`protocol/`、`session/`。确定性业务替身仅位于 `test/`。

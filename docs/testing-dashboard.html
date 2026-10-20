@@ -3,94 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#f3f6fa">
-  <title>测试总览 · Guomi Gateway</title>
+  <title>测试总览 · 国密推理网关</title>
   <style>
-    :root{color-scheme:dark;--bg:#0d1724;--panel:#142234;--panel2:#182a3e;--line:#293b50;--text:#eef4f7;--muted:#91a3b8;--mint:#70e0c0;--blue:#81b9ff;--amber:#f0bd70;--rose:#ff8b90;--mono:"Cascadia Code",Consolas,monospace;--sans:Inter,"Segoe UI","Microsoft YaHei",sans-serif}
-    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 80% -10%,#1d3a50 0,transparent 38%),var(--bg);color:var(--text);font:14px/1.6 var(--sans)}a{color:inherit;text-decoration:none}.shell{max-width:1360px;margin:auto;padding:28px 40px 36px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:58px}.brand{display:flex;align-items:center;gap:12px;font-weight:650;letter-spacing:.02em}.brand-mark{width:38px;height:38px;display:grid;place-items:center;border:1px solid #487b80;background:#153c43;border-radius:12px;color:var(--mint);font-size:19px}.brand small{display:block;color:var(--muted);font-size:10px;letter-spacing:.15em;font-weight:500}.top-meta{display:flex;align-items:center;gap:18px;color:var(--muted);font-size:12px}.live{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #285447;border-radius:30px;color:#b4ebd7;background:#102d2a}.live i{width:7px;height:7px;background:var(--mint);border-radius:50%;box-shadow:0 0 12px #70e0c0}.hero{display:grid;grid-template-columns:1.25fr .75fr;gap:42px;align-items:end;margin-bottom:26px}.eyebrow{color:var(--mint);font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase}.hero h1{font-size:clamp(34px,5vw,56px);letter-spacing:-.045em;line-height:1.12;margin:12px 0 14px;font-weight:650}.hero p{color:var(--muted);max-width:610px;margin:0;font-size:15px}.report-card{border-left:1px solid var(--line);padding:4px 0 6px 26px}.report-card span{display:block;color:var(--muted);font-size:11px}.report-card strong{display:block;font-size:15px;margin:5px 0;font-weight:550}.report-card code{font:11px var(--mono);color:#a8bdd1}.summary{display:grid;grid-template-columns:1.4fr repeat(3,1fr);gap:14px;margin:32px 0 18px}.stat{background:linear-gradient(145deg,#17283a,#132133);border:1px solid var(--line);border-radius:16px;padding:20px 21px;min-height:126px;position:relative;overflow:hidden}.stat.main-stat{background:linear-gradient(135deg,#163b3c,#17303c);border-color:#2d6258}.stat-label{display:flex;align-items:center;justify-content:space-between;color:#afc0d1;font-size:11px}.stat-label b{color:var(--mint);font-weight:550}.stat-value{font-size:38px;line-height:1.1;letter-spacing:-.045em;font-variant-numeric:tabular-nums;margin:12px 0 3px}.stat-note{color:var(--muted);font-size:11px}.stat-symbol{color:var(--mint);font-size:16px}.progress-card{background:#142234;border:1px solid var(--line);border-radius:16px;padding:19px 21px;margin-bottom:54px}.progress-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:13px}.progress-head strong{font-weight:550}.progress-head span{color:var(--mint);font:12px var(--mono)}.progress-track{height:9px;background:#283a4d;border-radius:9px;overflow:hidden;display:flex}.progress-pass{width:98.96%;background:linear-gradient(90deg,#4cb894,#83e0c5);border-radius:9px}.progress-skip{width:1.04%;min-width:5px;background:var(--amber)}.progress-legend{display:flex;gap:20px;margin-top:12px;color:var(--muted);font-size:11px}.legend-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin:0 0 19px}.section-head h2{font-size:22px;letter-spacing:-.025em;margin:0;font-weight:600}.section-head p{color:var(--muted);font-size:12px;margin:3px 0 0}.section-index{font:11px var(--mono);color:#6c8199}.suite-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}.suite{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:17px 16px;min-width:0;transition:transform .18s,border-color .18s}.suite:hover{transform:translateY(-3px);border-color:#456277}.suite-top{display:flex;justify-content:space-between;align-items:center;gap:8px}.suite-icon{width:31px;height:31px;display:grid;place-items:center;border-radius:10px;background:#20374a;color:var(--blue);font-size:14px}.suite-status{font-size:10px;color:var(--mint)}.suite h3{font-size:13px;margin:15px 0 2px;font-weight:550}.suite-sub{font-size:10px;color:var(--muted);min-height:32px}.suite-count{font-size:25px;font-variant-numeric:tabular-nums;letter-spacing:-.03em;margin-top:15px}.suite-count small{font-size:10px;color:var(--muted);letter-spacing:0}.mini-track{height:4px;background:#2a3d50;border-radius:4px;margin:12px 0 8px;overflow:hidden}.mini-track i{display:block;height:100%;background:var(--mint);border-radius:4px}.suite-foot{display:flex;justify-content:space-between;font:10px var(--mono);color:#a1b4c7}.suite-foot b{color:var(--mint);font-weight:500}.grid-lower{display:grid;grid-template-columns:1.1fr .9fr;gap:15px;margin:54px 0}.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px}.panel-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.panel h2{font-size:17px;margin:0;font-weight:570}.panel-kicker{font-size:10px;color:var(--muted);letter-spacing:.12em}.sample-table{width:100%;border-collapse:collapse;font-size:11px}.sample-table th{text-align:left;color:var(--muted);font-weight:500;font-size:10px;padding:0 8px 10px}.sample-table td{padding:12px 8px;border-top:1px solid #26384b;vertical-align:top}.sample-table td:first-child{color:#dce8f2}.sample-table code{font:10px var(--mono);color:#abc0d3}.sample-result{color:var(--mint);white-space:nowrap}.sample-time{font:10px var(--mono);color:#b6c5d3;white-space:nowrap}.vector{background:#0f1b2a;border:1px solid #293d51;border-radius:11px;padding:13px 14px;margin-top:10px}.vector-label{display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-bottom:8px}.vector code{font:10px/1.7 var(--mono);color:#c5d8e8;overflow-wrap:anywhere}.vector code b{color:var(--mint);font-weight:500}.vector-output{margin-top:7px!important;color:var(--mint)!important}.case-list{display:grid;gap:9px}.case{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:10px;padding:10px 11px;background:#101d2c;border:1px solid #24374a;border-radius:10px}.case-check{width:19px;height:19px;display:grid;place-items:center;border-radius:50%;background:#17463b;color:var(--mint);font-size:11px}.case-name{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.case-name small{display:block;color:var(--muted);font-size:10px}.case-time{font:10px var(--mono);color:#9eb3c7}.notes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:50px}.note{padding:16px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.note b{display:block;color:var(--text);font-weight:550;margin-bottom:5px}.note strong{color:var(--amber);font-weight:550}.footer{display:flex;justify-content:space-between;gap:16px;border-top:1px solid var(--line);padding-top:17px;color:#73879d;font-size:10px}.footer code{font:10px var(--mono)}
-    :root{color-scheme:light;--bg:#f3f6fa;--panel:#fff;--panel2:#f7f9fc;--line:#e3eaf1;--text:#233346;--muted:#5f6e81;--mint:#087e80;--blue:#398a9a;--amber:#98631c;--rose:#ac4940}
-    body{background:radial-gradient(ellipse at 80% -10%,#e8f3f1 0,transparent 38%),var(--bg);color:var(--text)}
-    .brand-mark{border-color:#b9d8d3;background:#eaf5f3;color:var(--mint)}
-    .live{border-color:#d8ebe5;background:#eaf5f2;color:#247a68}.live i{box-shadow:0 0 10px #70cbb5}
-    .eyebrow,.stat-label b,.stat-symbol,.progress-head span,.suite-status,.suite-foot b,.vector code b{color:var(--mint)}
-    .report-card code{color:#516175}
-    .stat{background:#fff;box-shadow:0 3px 12px #13344f08}.stat.main-stat{background:linear-gradient(135deg,#edf7f4,#f9fcfb);border-color:#d6e8e5}.stat-label{color:#516175}
-    .progress-card{background:#fff;box-shadow:0 3px 12px #13344f08}.progress-track,.mini-track{background:#e8edf2}.progress-pass{background:linear-gradient(90deg,#087e80,#45aa97)}.progress-skip{background:#a56b16}
-    .suite,.panel{background:#fff;box-shadow:0 3px 12px #13344f08}.suite:hover{border-color:#98c8c2}.suite-icon{background:#eaf5f3;color:var(--mint)}.suite-foot{color:var(--muted)}.mini-track i{background:var(--mint)}
-    .sample-table td{border-color:var(--line)}.sample-table td:first-child{color:#29495e}.sample-table code{color:#516175}.sample-result{color:#247a68}.sample-time{color:#516175}
-    .vector{background:#f7f9fc;border-color:var(--line)}.vector code{color:#41566a}
-    .case{background:#f7f9fc;border-color:#edf0f5}.case-check{background:#e3f3ed;color:#247a68}.case-time{color:#516175}
-    .note strong{color:#875815}
-    .section-index,.footer{color:var(--muted)}
-    .sample-table-wrap{overflow-x:auto;border-radius:8px}.sample-table{min-width:490px}.sample-table caption,.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-    @media(max-width:1050px){.suite-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.summary{grid-template-columns:repeat(2,1fr)}.stat.main-stat{grid-row:span 1}}
-    @media(max-width:700px){.shell{padding:19px 16px 26px}.topbar{margin-bottom:38px}.top-meta{gap:8px}.top-meta>span:first-child{display:none}.hero{grid-template-columns:1fr;gap:24px}.report-card{padding-left:14px}.hero h1{font-size:38px}.summary{gap:9px}.stat{padding:15px;min-height:110px}.stat-value{font-size:32px}.progress-card{margin-bottom:40px;padding:16px}.suite-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.suite{padding:14px}.suite h3{font-size:12px}.grid-lower{grid-template-columns:1fr;margin:40px 0}.panel{padding:16px}.sample-table{font-size:10px}.sample-table th,.sample-table td{padding-left:4px;padding-right:4px}.notes{grid-template-columns:1fr;gap:0;margin-bottom:35px}.note{padding:13px 4px}.footer{flex-direction:column}.section-head h2{font-size:19px}}
-    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+    :root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #233346; background: #f3f6fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.7; }
+    main { max-width: 1000px; margin: auto; padding: 36px 24px; }
+    h1 { margin-bottom: 8px; font-size: 30px; }
+    h2 { font-size: 20px; margin-top: 0; }
+    a { color: #087e80; text-underline-offset: 3px; }
+    .muted, footer { color: #5f6e81; font-size: 14px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 24px 0; }
+    .stat, section { background: white; border: 1px solid #e0e7ee; border-radius: 12px; padding: 20px; }
+    .stat strong { display: block; font-size: 30px; color: #087e80; }
+    section { margin-bottom: 20px; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { border-bottom: 1px solid #e3eaf1; padding: 10px 12px; white-space: nowrap; }
+    th { color: #5f6e81; font-weight: 600; }
+    caption { text-align: left; padding-bottom: 12px; color: #5f6e81; }
+    code { font-size: 13px; overflow-wrap: anywhere; }
+    @media (max-width: 650px) { main { padding: 20px 14px; } .stats { grid-template-columns: repeat(2, 1fr); } section { padding: 16px; } }
   </style>
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <a class="brand" href="#top" aria-label="Guomi Gateway 测试总览首页"><span class="brand-mark">G</span><span>GUOMI GATEWAY<small>QUALITY OVERVIEW</small></span></a>
-      <div class="top-meta"><span>工程质量 · 测试运行</span><span class="live"><i></i>回归快照</span></div>
-    </header>
-    <section class="hero" id="top">
-      <div><div class="eyebrow">TEST ATLAS / 2026.10.18</div><h1>可靠性，逐项验证。</h1><p>从密码后端与安全会话，到完整三进程推理链路。这里展示最近一次本地非外部回归的通过概况，以及可以追溯到测试断言的实际样例。</p></div>
-      <div class="report-card"><span>报告时间 · Asia/Shanghai</span><strong>2026 年 10 月 18 日 · 17:02</strong><code>Python 3.12.11 · GmSSL 3.1.1 · Windows</code></div>
-    </section>
-    <section class="summary" aria-label="回归摘要">
-      <article class="stat main-stat"><div class="stat-label">已通过用例 <b>● 全部通过</b></div><div class="stat-value">476</div><div class="stat-note">覆盖本次完整非 e2e 回归</div></article>
-      <article class="stat"><div class="stat-label">测试总数 <span class="stat-symbol">◈</span></div><div class="stat-value">481</div><div class="stat-note">含 5 项平台条件跳过</div></article>
-      <article class="stat"><div class="stat-label">运行耗时 <span class="stat-symbol">◷</span></div><div class="stat-value">145.28<small style="font-size:14px;color:var(--muted);letter-spacing:0"> s</small></div><div class="stat-note">JUnit 实测 145.277 秒</div></article>
-      <article class="stat"><div class="stat-label">失败用例 <span class="stat-symbol">✓</span></div><div class="stat-value">0</div><div class="stat-note">失败 0 · 错误 0</div></article>
-    </section>
-    <section class="progress-card" aria-label="用例执行比例">
-      <div class="progress-head"><strong>本轮执行结果</strong><span>476 / 476 PASS</span></div>
-      <div class="progress-track" role="img" aria-label="476 项通过，5 项跳过"><span class="progress-pass"></span><span class="progress-skip"></span></div>
-      <div class="progress-legend"><span><i class="legend-dot" style="background:var(--mint)"></i>通过 476</span><span><i class="legend-dot" style="background:var(--amber)"></i>跳过 5 · Linux bootstrap 环境未配置</span></div>
-    </section>
-    <section aria-labelledby="suite-title">
-      <div class="section-head"><div><div class="eyebrow">SUITE BREAKDOWN</div><h2 id="suite-title">测试版图</h2><p>按 pytest 报告中的测试模块归类；各进度条表示本次已执行用例的通过比例。</p></div><span class="section-index">01 / 03</span></div>
-      <div class="suite-grid">
-        <article class="suite"><div class="suite-top"><span class="suite-icon">⌘</span><span class="suite-status">● PASS</span></div><h3>应用单元测试</h3><div class="suite-sub">CLI · 编解码 · 流式 · 配置 · Provider</div><div class="suite-count">159 <small>/ 159 项通过</small></div><div class="mini-track"><i style="width:100%"></i></div><div class="suite-foot"><span>通过率</span><b>100%</b></div></article>
-        <article class="suite"><div class="suite-top"><span class="suite-icon">⇄</span><span class="suite-status">● PASS</span></div><h3>网关单元测试</h3><div class="suite-sub">中继 · 审计 · 指标 · 日志</div><div class="suite-count">134 <small>/ 134 项通过</small></div><div class="mini-track"><i style="width:100%"></i></div><div class="suite-foot"><span>通过率</span><b>100%</b></div></article>
-        <article class="suite"><div class="suite-top"><span class="suite-icon">◉</span><span class="suite-status">● PASS</span></div><h3>安全核心测试</h3><div class="suite-sub">SM2 / SM3 / SM4 · 会话 · 协议</div><div class="suite-count">73 <small>/ 73 项通过</small></div><div class="mini-track"><i style="width:100%"></i></div><div class="suite-foot"><span>通过率</span><b>100%</b></div></article>
-        <article class="suite"><div class="suite-top"><span class="suite-icon">⛓</span><span class="suite-status">● PASS</span></div><h3>集成测试</h3><div class="suite-sub">真实 GmSSL · TCP · 三进程 · WebUI</div><div class="suite-count">95 <small>/ 95 项通过</small></div><div class="mini-track"><i style="width:100%"></i></div><div class="suite-foot"><span>通过率</span><b>100%</b></div></article>
-        <article class="suite"><div class="suite-top"><span class="suite-icon">◌</span><span class="suite-status">● PASS</span></div><h3>基准与验收测试</h3><div class="suite-sub">TLS 身份 · 证据完整性 · 报告</div><div class="suite-count">15 <small>/ 15 项通过</small></div><div class="mini-track"><i style="width:100%"></i></div><div class="suite-foot"><span>通过率</span><b>100%</b></div></article>
-      </div>
-    </section>
-    <section class="grid-lower" aria-label="测试数据样例">
-      <article class="panel">
-        <div class="panel-head"><div><h2>真实链路样例</h2><span class="panel-kicker">TWO-LINK · SM2 / SM4-GCM</span></div><span class="section-index">02 / 03</span></div>
-        <div class="sample-table-wrap" role="region" aria-label="双链路测试样例，可横向滚动" tabindex="0"><table class="sample-table"><caption>真实双链路测试输入、运行耗时与结果</caption><thead><tr><th scope="col">测试路径</th><th scope="col">输入样例</th><th scope="col">耗时</th><th scope="col">结果</th></tr></thead><tbody>
-          <tr><td>普通请求</td><td><code>payload 1 KiB</code></td><td class="sample-time">0.744 s</td><td class="sample-result">通过</td></tr>
-          <tr><td>普通请求</td><td><code>payload 70 KiB</code></td><td class="sample-time">0.773 s</td><td class="sample-result">通过</td></tr>
-          <tr><td>流式请求</td><td><code>payload 70 KiB</code></td><td class="sample-time">0.971 s</td><td class="sample-result">通过</td></tr>
-          <tr><td>篡改拒绝</td><td><code>client / upstream</code></td><td class="sample-time">0.572 / 0.611 s</td><td class="sample-result">推理调用 0</td></tr>
-          <tr><td>Unicode 边界</td><td><code>记录上限 8 B · 中文🙂 × 20</code></td><td class="sample-time">0.666 / 0.642 s</td><td class="sample-result">普通 / 流式通过</td></tr>
-        </tbody></table></div>
-        <div class="vector"><div class="vector-label"><span>密码后端 · SM3 已知答案</span><span>RFC / known-answer test</span></div><code>输入&nbsp; <b>abc</b><br>输出&nbsp; 66c7f0f462eeedd9d1f2d46bdc10e4e2<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4167c4875cf2f7a2297da02b8f4ba8e0</code></div>
-      </article>
-      <article class="panel">
-        <div class="panel-head"><h2>用例观察</h2><span class="panel-kicker">SELECTED ASSERTIONS</span></div>
-        <div class="case-list">
-          <div class="case"><span class="case-check">✓</span><div class="case-name">test_real_roundtrip_and_privacy<small>双链路完成 / 流式 · 多种消息尺寸</small></div><span class="case-time">0.744–0.971 s</span></div>
-          <div class="case"><span class="case-check">✓</span><div class="case-name">test_ciphertext_tampering_never_calls_inference<small>客户端与上游篡改均在推理前拒绝</small></div><span class="case-time">0.572 / 0.611 s</span></div>
-          <div class="case"><span class="case-check">✓</span><div class="case-name">test_replay_never_executes_twice<small>重放不会重复执行业务</small></div><span class="case-time">0.686 s</span></div>
-          <div class="case"><span class="case-check">✓</span><div class="case-name">test_tls_mutual_identity_and_ready<small>正确身份通过；缺证书、错证书、错名称被拒</small></div><span class="case-time">4 variants</span></div>
-          <div class="case"><span class="case-check">✓</span><div class="case-name">test_complete_includes_prompt_model_and_context<small>合成输入返回 [mock:mock-model] hello (context: context-a)</small></div><span class="case-time">0.002 s</span></div>
-        </div>
-      </article>
-    </section>
-    <section aria-labelledby="scope-title">
-      <div class="section-head"><div><div class="eyebrow">SCOPE & NOTES</div><h2 id="scope-title">结果范围</h2></div><span class="section-index">03 / 03</span></div>
-      <div class="notes">
-        <div class="note"><b>5 项跳过</b>Linux bootstrap 用例在本次 Windows 环境跳过，尚不能代表 Linux 运行结果。</div>
-        <div class="note"><b>外部模型</b><strong>1 项 e2e 未执行</strong>；本次回归使用本地替身，不产生真实模型请求。</div>
-        <div class="note"><b>可追溯来源</b>分类与耗时取自 2026-10-18 JUnit 快照；具体样例对应 <code>test/integration/test_topology.py</code> 等断言。</div>
-      </div>
-    </section>
-    <footer class="footer"><span>GUOMI GATEWAY <span aria-hidden="true">·</span> 测试结果快照</span><span>报告来源 <code>artifacts/manual-lab-junit.xml</code></span></footer>
-  </main>
+<main>
+  <header>
+    <p class="muted">国密大模型推理安全网关 · 2026-10-21 · 实现 cfb544e</p>
+    <h1>测试总览</h1>
+    <p>本地功能与安全回归通过，64 档性能测试无业务失败。测试使用真实国密链路和本地模型替身。</p>
+    <nav aria-label="报告导航"><a href="integration_report.md">测试报告</a> · <a href="tls_baseline_results.md">性能明细</a> · <a href="testing.md">复现步骤</a></nav>
+  </header>
+  <div class="stats" aria-label="回归结果">
+    <div class="stat">通过<strong>541</strong></div>
+    <div class="stat">失败 / 错误<strong>0</strong></div>
+    <div class="stat">平台相关跳过<strong>6</strong></div>
+    <div class="stat">JUnit 耗时<strong>176.07 s</strong></div>
+  </div>
+  <section aria-labelledby="coverage">
+    <h2 id="coverage">测了哪些内容</h2>
+    <div class="table-wrap"><table>
+      <caption>547 项回归用例，另有 1 项外部模型用例未执行。</caption>
+      <thead><tr><th scope="col">模块</th><th scope="col">通过</th><th scope="col">跳过</th><th scope="col">重点</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">应用单元测试</th><td>170</td><td>5</td><td>CLI、编解码、模型适配、WebUI</td></tr>
+        <tr><th scope="row">网关单元测试</th><td>148</td><td>0</td><td>转发、审计、日志、连接池</td></tr>
+        <tr><th scope="row">安全核心测试</th><td>93</td><td>1</td><td>密码算法、握手、恢复与密钥管理</td></tr>
+        <tr><th scope="row">集成测试</th><td>97</td><td>0</td><td>真实双链路、独立进程、协议故障注入</td></tr>
+        <tr><th scope="row">基准与验收测试</th><td>33</td><td>0</td><td>TLS 身份与恢复、预算、证据检查</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">6 项跳过分别为 5 项 Linux bootstrap 环境测试和 1 项 POSIX 权限测试。运行中有一条 pytest 缓存权限警告，不影响用例和报告输出。</p>
+  </section>
+  <section aria-labelledby="performance">
+    <h2 id="performance">国密与 TLS 1.3</h2>
+    <p>双方都开启会话恢复和上游连接池。64 档共完成 <strong>1,371,209</strong> 次成功请求，0 次业务失败；800 个预热后握手均实际恢复，审计和停机检查通过。</p>
+    <div class="table-wrap"><table>
+      <caption>审计开启、10 并发、普通请求；双向有效吞吐。</caption>
+      <thead><tr><th scope="col">载荷</th><th scope="col">国密</th><th scope="col">TLS 1.3</th></tr></thead>
+      <tbody><tr><th scope="row">1 KiB</th><td>1.67 MiB/s</td><td>1.81 MiB/s</td></tr><tr><th scope="row">16 KiB</th><td>21.82 MiB/s</td><td>51.49 MiB/s</td></tr></tbody>
+    </table></div>
+    <p>TLS 在这些档位吞吐更高。项目特色主要是国密应用、推理链路适配、隐私审计与安全状态展示。</p>
+  </section>
+  <section aria-labelledby="scope">
+    <h2 id="scope">结果说明</h2>
+    <p>Windows 本机三进程、单轮回环负载；国密恢复使用加密持久化存储，TLS 使用进程内缓存。RSS 含测量样本，不据此比较内存优势。</p>
+    <p>本轮未验证 Linux、浏览器人工操作、独立 Node 前端回归、真实模型持续调用、跨主机、多轮稳定性及生产发布。项目当前不提供前向保密或 TLS/TLCP 互操作。</p>
+  </section>
+  <footer>来源：<code>artifacts/tls-baseline-regression.xml</code>、<code>artifacts/tls-baseline-matched.json</code>。本页与测试报告使用同一份已完成的测试证据，本次文档整理未重跑回归与负载。</footer>
+</main>
 </body>
 </html>
