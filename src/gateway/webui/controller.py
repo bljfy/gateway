@@ -59,6 +59,7 @@ class Controller:
         self.request_phase = "idle"
         self.authenticated = False
         self.auth_test: dict[str, object] = {"phase": "idle"}
+        self._auth_test_started = 0.0
         self.auth_test_successes = 0
         self.auth_test_failures = 0
         self.runtime: Runtime | None = None
@@ -275,6 +276,7 @@ class Controller:
             self.operation_runtime = runtime
             self.authenticated, self.error = False, None
             assert self.settings is not None
+            self._auth_test_started = perf_counter()
             self.auth_test = {
                 "phase": "running",
                 "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
@@ -287,7 +289,6 @@ class Controller:
 
     async def _test(self, runtime: Runtime) -> None:
         session: SecureSession | None = None
-        started = perf_counter()
         self.authenticated, self.error = False, None
         try:
             assert runtime.target is not None
@@ -312,7 +313,9 @@ class Controller:
                 try:
                     await runtime.manager.close()
                 finally:
-                    self.auth_test["duration_ms"] = round((perf_counter() - started) * 1000)
+                    self.auth_test["duration_ms"] = round(
+                        (perf_counter() - self._auth_test_started) * 1000
+                    )
                     self.auth_test["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
                     asyncio.get_running_loop().call_soon(self.changed)
 
@@ -544,6 +547,13 @@ class Controller:
                 if self.operation_runtime:
                     # 任务可能尚未进入协程体，不能仅依赖其 finally 回收运行对象。
                     await self.operation_runtime.manager.close()
+                if self.auth_test["phase"] == "running":
+                    # 创建后立即取消的任务不会执行 _test 的异常处理或 finally。
+                    self.auth_test["phase"] = "cancelled"
+                    self.auth_test["duration_ms"] = round(
+                        (perf_counter() - self._auth_test_started) * 1000
+                    )
+                    self.auth_test["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
                 if self.request_phase == "running":
                     self.request_phase = "cancelled"
                 if self.simulation and self.simulation.phase == "running":
