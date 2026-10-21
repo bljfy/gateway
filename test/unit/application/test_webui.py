@@ -72,6 +72,60 @@ async def test_auth_test_result_lifecycle(outcome, tmp_path, monkeypatch):
     assert controller.snapshot()["auth_test_totals"] == state["auth_test_totals"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("shutdown", [False, True])
+async def test_auth_test_cancel_before_or_during_handshake(
+    started, shutdown, tmp_path, monkeypatch
+):
+    from gateway.webui.controller import Controller
+
+    controller = Controller(PeerRole.CLIENT, tmp_path / "client.json")
+    controller.settings = Settings(str(controller.path), target_id="gateway")
+    entered = asyncio.Event()
+
+    async def open_session(target):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager = SimpleNamespace(open=AsyncMock(side_effect=open_session), close=AsyncMock())
+    runtime = SimpleNamespace(target=object(), manager=manager)
+    monkeypatch.setattr(controller, "new_runtime", lambda: runtime)
+    queue = asyncio.Queue()
+    controller.sockets["observer"] = queue
+    await controller.test_connection()
+    if started:
+        async with asyncio.timeout(3):
+            await entered.wait()
+    if shutdown:
+        await controller.close()
+    else:
+        await controller.cancel()
+    state = controller.snapshot()
+    assert state["busy"] is False
+    assert state["authenticated"] is False
+    assert state["auth_test"]["phase"] == "cancelled"
+    assert state["auth_test"]["duration_ms"] >= 0
+    assert state["auth_test"]["finished_at"]
+    assert state["auth_test"]["target_id"] == "gateway"
+    assert state["auth_test_totals"] == {"success": 0, "failed": 0}
+    assert manager.open.await_count == int(started)
+    assert manager.close.await_count >= 1
+    while not queue.empty():
+        pushed = queue.get_nowait()
+    assert pushed["state"] == state
+    await controller.cancel()
+    assert controller.snapshot()["auth_test"] == state["auth_test"]
+    session = SimpleNamespace(close=AsyncMock())
+    manager.open.side_effect = None
+    manager.open.return_value = session
+    await controller.test_connection()
+    await controller.operation
+    assert controller.snapshot()["auth_test"]["phase"] == "success"
+    assert controller.snapshot()["auth_test_totals"] == {"success": 1, "failed": 0}
+    session.close.assert_awaited_once()
+
+
 @pytest.mark.parametrize("role,port", [("client", 18080), ("gateway", 18081), ("adapter", 18082)])
 def test_webui_cli_role_defaults(role, port, monkeypatch):
     calls = []

@@ -28,6 +28,8 @@
 
 ### 修复
 
+- 修复客户端网关认证任务启动前被取消后，页面仍显示“认证测试中”的问题；保留取消结果、完成时间和总耗时，补充启动前／握手中取消及退出清理回归。
+
 - 修复多模型配置更新后，一键启动无法加载旧版 client／gateway WebUI 旁配置的问题；`services_json` 仅用于 adapter。
 
 - 修复 Linux CI 中 demo 停机端口检查误报 `Address already in use`：使用 `socket.create_server` 重新监听，允许 POSIX 复用 TIME_WAIT 地址，同时继续拒绝仍被活跃监听器占用的端口。
