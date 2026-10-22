@@ -3,12 +3,33 @@
 import asyncio
 from collections.abc import Callable
 from contextlib import suppress
+from uuid import uuid4
 
-from gateway.contracts import SecureSession, SessionClosedError
+from gateway.contracts import RecordType, SecureSession, SessionClosedError
+from gateway.protocol import MAX_FRAME, ZERO_REQUEST
 from gateway.runtime import Runtime
 from gateway.session.core import SecuritySession
 
-MODES = frozenset({"normal", "stalled_handshake", "malformed_frame", "abrupt_disconnect"})
+SECURE_MODES = frozenset(
+    {
+        "normal",
+        "abrupt_disconnect",
+        "heartbeat",
+        "graceful_close",
+        "unexpected_record",
+        "out_of_order_fragment",
+    }
+)
+MODES = SECURE_MODES | frozenset(
+    {
+        "stalled_handshake",
+        "malformed_frame",
+        "tcp_disconnect",
+        "empty_frame",
+        "oversized_frame",
+        "truncated_frame",
+    }
+)
 MAX_CLIENTS = 32
 MAX_DURATION = 60
 
@@ -47,7 +68,7 @@ class Simulation:
             address = runtime.manager.trust[runtime.target.peer_id].address
             assert address is not None
             async with asyncio.timeout(runtime.gateway.session.handshake_timeout_seconds + 1):
-                if self.mode in {"normal", "abrupt_disconnect"}:
+                if self.mode in SECURE_MODES:
                     session = await runtime.manager.open(runtime.target)
                 else:
                     reader, writer = await asyncio.open_connection(*address)
@@ -59,22 +80,62 @@ class Simulation:
                     assert isinstance(session, SecuritySession)
                     session.writer.transport.abort()
                     row["result"] = "disconnected"
+                elif self.mode == "graceful_close":
+                    await session.close()
+                    row["result"] = "gracefully_closed"
                 else:
+                    if self.mode == "unexpected_record":
+                        await session.send(RecordType.RESPONSE, b"simulation", request_id=uuid4())
+                    elif self.mode == "out_of_order_fragment":
+                        await session.send(
+                            RecordType.REQUEST,
+                            b"simulation",
+                            request_id=uuid4(),
+                            chunk_index=1,
+                            end_of_message=False,
+                        )
                     try:
                         receiving = asyncio.create_task(session.recv())
-                        done, _ = await asyncio.wait({receiving}, timeout=self.duration)
+                        if self.mode == "heartbeat":
+                            row["phase"] = "heartbeating"
+                            self.changed()
+                            deadline = asyncio.get_running_loop().time() + self.duration
+                            while not receiving.done():
+                                remaining = deadline - asyncio.get_running_loop().time()
+                                if remaining <= 0:
+                                    break
+                                await session.send(
+                                    RecordType.HEARTBEAT, b"", request_id=ZERO_REQUEST
+                                )
+                                await asyncio.wait({receiving}, timeout=min(1, remaining))
+                            done = {receiving} if receiving.done() else set()
+                        else:
+                            done, _ = await asyncio.wait({receiving}, timeout=self.duration)
                         if done:
                             receiving.result()
                             row["result"] = "unexpected_record"
                         else:
-                            row["result"] = "held"
+                            row["result"] = (
+                                "heartbeat_completed" if self.mode == "heartbeat" else "held"
+                            )
                     except SessionClosedError:
                         row["result"] = "peer_closed"
             else:
                 assert writer is not None
-                if self.mode == "malformed_frame":
-                    writer.write(b"\x00\x00\x00\x01\xff")
+                if self.mode == "tcp_disconnect":
+                    row["result"] = "tcp_disconnected"
+                    return
+                frames = {
+                    "malformed_frame": b"\x00\x00\x00\x01\xff",
+                    "empty_frame": b"\x00\x00\x00\x00",
+                    "oversized_frame": (MAX_FRAME + 1).to_bytes(4, "big"),
+                    "truncated_frame": b"\x00\x00\x00\x10\xff",
+                }
+                if self.mode in frames:
+                    writer.write(frames[self.mode])
                     await writer.drain()
+                    if self.mode == "truncated_frame":
+                        writer.write_eof()
                 try:
                     async with asyncio.timeout(self.duration):
                         await reader.readexactly(1)

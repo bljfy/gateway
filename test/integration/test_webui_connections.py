@@ -65,6 +65,12 @@ async def test_parallel_authenticated_clients_live_websocket_and_cleanup(uis):
         ("malformed_frame", "protocol_rejected"),
         ("abrupt_disconnect", "protocol_rejected"),
         ("stalled_handshake", "timeout"),
+        ("tcp_disconnect", "protocol_rejected"),
+        ("empty_frame", "protocol_rejected"),
+        ("oversized_frame", "protocol_rejected"),
+        ("truncated_frame", "protocol_rejected"),
+        ("unexpected_record", "protocol_rejected"),
+        ("out_of_order_fragment", "protocol_rejected"),
     ],
 )
 async def test_abnormal_clients_are_observed_and_gateway_recovers(uis, mode, result):
@@ -88,37 +94,81 @@ async def test_abnormal_clients_are_observed_and_gateway_recovers(uis, mode, res
         )[0] == 202
         state = await idle(uis)
         assert state["simulation"]["phase"] == "completed"
+        expected_client_result = (
+            "disconnected"
+            if mode == "abrupt_disconnect"
+            else "tcp_disconnected"
+            if mode == "tcp_disconnect"
+            else "peer_closed"
+        )
+        assert all(
+            row["result"] == expected_client_result for row in state["simulation"]["clients"]
+        )
         monitor = await wait_connections(uis, 0)
         assert len(monitor["recent"]) == 3
         assert all(row["result"] == result for row in monitor["recent"])
         assert (
             all(row["peer"] is None for row in monitor["recent"])
-            if mode != "abrupt_disconnect"
+            if mode not in {"abrupt_disconnect", "unexpected_record", "out_of_order_fragment"}
             else all(row["peer"] == "client" for row in monitor["recent"])
         )
         assert (await uis.api("client", "test", "POST"))[0] == 202
         assert (await idle(uis))["authenticated"]
+        assert (await uis.api("adapter", "state"))[1]["model_verified"] is False
     finally:
         await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_simulation_disconnect_and_early_cancel_reclaim_all_sessions(uis):
+@pytest.mark.parametrize("mode", ["normal", "heartbeat", "stalled_handshake"])
+async def test_simulation_disconnect_and_early_cancel_reclaim_all_sessions(uis, mode):
     assert (await uis.api("gateway", "start", "POST"))[0] == 200
     ws, owner = await uis.ws()
     controller = uis.clients["client"].app[CONTROLLER]
-    await controller.simulate({"owner": owner, "count": 3, "duration": 60, "mode": "normal"})
+    await controller.simulate({"owner": owner, "count": 3, "duration": 60, "mode": mode})
     runtime = controller.operation_runtime
     await controller.cancel()
     assert controller.simulation.phase == "cancelled" and not controller.busy
     assert runtime.manager.session_counts()["active_sessions"] == 0
-    await controller.simulate({"owner": owner, "count": 3, "duration": 60, "mode": "normal"})
-    await wait_connections(uis, 3, "active")
+    await controller.simulate({"owner": owner, "count": 3, "duration": 60, "mode": mode})
+    await wait_connections(uis, 3, "handshaking" if mode == "stalled_handshake" else "active")
     runtime = controller.operation_runtime
     await ws.close()
     await idle(uis)
     await wait_connections(uis, 0)
     assert runtime.manager.session_counts()["active_sessions"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode,result", [("heartbeat", "heartbeat_completed"), ("graceful_close", "gracefully_closed")]
+)
+async def test_additional_normal_cases_close_cleanly_without_model(uis, mode, result):
+    assert (await uis.api("gateway", "start", "POST"))[0] == 200
+    ws, owner = await uis.ws()
+    try:
+        code, _ = await uis.api(
+            "client",
+            "simulation",
+            "POST",
+            {
+                "owner": owner,
+                "count": 3,
+                "duration": 1,
+                "mode": mode,
+            },
+        )
+        assert code == 202
+        state = await idle(uis)
+        assert all(row["result"] == result for row in state["simulation"]["clients"])
+        monitor = await wait_connections(uis, 0)
+        assert len(monitor["recent"]) == 3
+        assert all(row["result"] == "closed" for row in monitor["recent"])
+        assert (await uis.api("gateway", "state"))[1]["metrics"]["requests_completed_total"] == 0
+        assert (await uis.api("client", "test", "POST"))[0] == 202
+        assert (await idle(uis))["authenticated"]
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -127,7 +127,6 @@ def create_app(
         content_types = {
             "index.html": "text/html",
             "app.js": "application/javascript",
-            "manual.js": "application/javascript",
             "output.js": "application/javascript",
             "sessions.js": "application/javascript",
             "markdown-it.min.js": "application/javascript",

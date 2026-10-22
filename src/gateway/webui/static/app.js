@@ -82,7 +82,6 @@ function controls() {
   $("simulation-stop").disabled = actionBusy || state.simulation?.phase !== "running";
   for (const id of ["simulation-mode", "simulation-count", "simulation-duration"]) $(id).disabled = !!locked;
   $("dirty-note").textContent = dirty ? "有未保存的连接参数，请先保存。" : "设置保存到独立旁文件，身份与信任文件保持原样。";
-  ManualUI.controls(state, actionBusy, owner);
 }
 function metric(label, value) {
   const box = document.createElement("div"); box.className = "metric";
@@ -118,7 +117,6 @@ function render(next) {
   if (currentId && state.request_id === currentId && state.request_phase !== "idle") resultStatus(state.request_phase);
   renderConnections(state.connections);
   renderSimulation(state.simulation);
-  ManualUI.render(state.manual);
   controls();
 }
 const connectionLabels = {handshaking:"握手中",active:"已认证",closed:"已关闭",authentication_failed:"认证失败",protocol_rejected:"协议拒绝",timeout:"超时",capacity:"容量拒绝",stopped:"服务停止",failed:"连接失败"};
@@ -147,7 +145,7 @@ function renderConnections(data) {
 function renderSimulation(data) {
   if (!data) return;
   $("simulation-phase").textContent = {running:"模拟进行中",completed:"批次已结束",cancelled:"已停止"}[data.phase] || data.phase;
-  const labels = {connecting:"连接中",authenticated:"已认证并保持",tcp_connected:"TCP 已连接",closed:"已结束",held:"保持时间结束",peer_closed:"网关已关闭连接",hold_elapsed:"到达保持时间",disconnected:"已主动中断",unexpected_data:"收到非预期数据",unexpected_record:"收到非预期记录",connection_failed:"连接失败或被关闭",cancelled:"已停止"};
+  const labels = {connecting:"连接中",authenticated:"已认证并保持",heartbeating:"正在发送心跳",tcp_connected:"TCP 已连接",closed:"已结束",held:"保持时间结束",heartbeat_completed:"心跳保持结束",gracefully_closed:"已完成关闭协商",tcp_disconnected:"握手前已主动断开",peer_closed:"网关已关闭连接",hold_elapsed:"到达保持时间",disconnected:"已主动中断",unexpected_data:"收到非预期数据",unexpected_record:"收到非预期记录",connection_failed:"连接失败或被关闭",cancelled:"已停止"};
   const fragment = document.createDocumentFragment();
   for (const client of data.clients) { const row = document.createElement("tr"); cells(row, ["客户端 " + client.client, labels[client.phase] || client.phase, labels[client.result] || "—"]); fragment.append(row); }
   $("simulation-clients").replaceChildren(fragment);
@@ -238,5 +236,21 @@ $("clear").onclick = () => {currentId = null; answer = null; renderAnswer(true);
 document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => el.addEventListener("input", () => {dirty = true; controls();}));
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close(); GatewaySessions.close();});
-ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
+const simulationDescriptions = {
+  normal:"完成 SM2 认证后保持连接，到达时限后正常关闭；网关应显示已认证连接。",
+  stalled_handshake:"只建立 TCP，不发送握手数据；保持时间超过网关握手超时后可观察超时关闭。",
+  malformed_frame:"发送单字节非法协议内容；对照网关最近结束记录中的协议拒绝。",
+  abrupt_disconnect:"认证后直接中断 TCP，省略关闭协商；对照网关的异常结束记录。",
+  heartbeat:"认证后每秒发送一次合法空心跳，持续到时限；网关应保持连接且不产生模型请求。",
+  graceful_close:"认证成功后立即执行 CLOSE / CLOSE_ACK 协商；网关应记录正常关闭。",
+  tcp_disconnect:"TCP 建立后立即关闭，不完成认证；网关应记录未认证连接结束。",
+  empty_frame:"只发送长度为零的帧头；网关应拒绝非法帧长度。",
+  oversized_frame:"只声明超过协议上限的长度，不发送大载荷；网关应立即拒绝。",
+  truncated_frame:"声明 16 字节帧体但只发送 1 字节，然后关闭发送方向；网关应拒绝截断帧。",
+  unexpected_record:"认证后发送 RESPONSE 记录，验证网关拒绝客户端使用错误业务类型。",
+  out_of_order_fragment:"认证后发送首片序号为 1 的未结束请求，验证分片顺序检查；不调用模型。"
+};
+function describeSimulation() { $("simulation-description").textContent = simulationDescriptions[$("simulation-mode").value] || ""; }
+$("simulation-mode").addEventListener("change", describeSimulation);
+describeSimulation();
 action(async () => {render(await api("state")); fill(await api("config")); await setupGuide(); connect();});

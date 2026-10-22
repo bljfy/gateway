@@ -121,7 +121,13 @@ async def test_loopback_boundary_missing_config_resources_and_privacy(tmp_path):
     async with TestClient(TestServer(create_app(PeerRole.CLIENT, tmp_path / "missing.json"))) as ui:
         origin = str(ui.make_url("/")).rstrip("/")
         headers = {"Origin": origin, "X-WebUI-Request": "1"}
-        assert (await ui.get("/")).status == 200
+        page = await ui.get("/")
+        assert page.status == 200
+        markup = await page.text()
+        assert "手动协议与密钥实验" not in markup
+        assert 'id="manual-open"' not in markup
+        assert 'id="config_path"' in markup
+        assert (await ui.get("/static/manual.js")).status == 404
         for name in ("style.css", "app.js", "output.js", "markdown-it.min.js"):
             response = await ui.get("/static/" + name)
             assert response.status == 200
