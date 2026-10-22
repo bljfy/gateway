@@ -7,14 +7,48 @@ import socket
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from aiohttp import ClientSession
 
 from gateway.contracts import PeerRole
-from gateway.runtime import prepare_demo
+from gateway.runtime import load_backend, prepare_demo
 from gateway.webui.launcher import api, launch
 from test.integration.test_topology import ports
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native loader PATH")
+def test_repeated_native_load_keeps_windows_path_bounded(tmp_path, backend, monkeypatch):
+    directory = str(Path(os.environ["GMSSL_LIBRARY"]).parent)
+    monkeypatch.setenv(
+        "PATH", directory.upper() + os.pathsep + directory + os.pathsep + os.environ["PATH"]
+    )
+    manifest = tmp_path / "native.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "library": os.environ["GMSSL_LIBRARY"],
+                "sha256": os.environ["GMSSL_SHA256"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    load_backend(manifest)
+    selected = os.environ["PATH"]
+    for _ in range(5):
+        load_backend(manifest)
+        assert os.environ["PATH"] == selected
+    normalized = os.path.normcase(os.path.normpath(directory))
+    assert (
+        sum(
+            os.path.normcase(os.path.normpath(item.strip('"'))) == normalized
+            for item in selected.split(os.pathsep)
+        )
+        == 1
+    )
+    # The loader must leave enough environment space to create child processes.
+    subprocess.run([sys.executable, "-c", "pass"], check=True)
 
 
 @pytest.fixture

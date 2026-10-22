@@ -75,7 +75,15 @@ def load_backend(manifest: Path) -> GmSSLBackend:
     )
     library = Path(_text(data.get("library"))).resolve(strict=True)
     if os.name == "nt":
-        os.environ["PATH"] = str(library.parent) + os.pathsep + os.environ.get("PATH", "")
+        directory = str(library.parent)
+        normalized = os.path.normcase(os.path.normpath(directory))
+        # Recreating WebUI runtimes must not grow the inherited environment block.
+        remaining = [
+            entry
+            for entry in os.environ.get("PATH", "").split(os.pathsep)
+            if os.path.normcase(os.path.normpath(entry.strip('"'))) != normalized
+        ]
+        os.environ["PATH"] = os.pathsep.join([directory, *remaining])
     return GmSSLBackend(library, sha256=_text(data.get("sha256")))
 
 
