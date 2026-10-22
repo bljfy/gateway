@@ -5,6 +5,7 @@ const errors = {setup_failed:"身份初始化失败。请检查 GmSSL 原生库�
 let state = {}, settings = {}, peers = [], owner = null, currentId = null;
 let dirty = false, actionBusy = false, socket = null, closing = false, submitting = false;
 let answer = null, answerFrame = null;
+let runtimeRole = null;
 async function setupGuide(force = false) {
   const setup = await api("setup");
   $("setup-guide").hidden = setup.ready && !force;
@@ -101,23 +102,54 @@ function render(next) {
   document.querySelectorAll(".outbound-only").forEach(el => {el.hidden = state.role === "adapter";});
   document.querySelectorAll(".gateway-only").forEach(el => {el.hidden = state.role !== "gateway";});
   GatewaySessions.setRole(state.role);
-  if (state.role !== "gateway") {$("runtime-events").open = true; $("runtime-metrics").open = true;}
+  if (runtimeRole !== state.role) {
+    $("runtime-events").open = state.role !== "gateway";
+    $("runtime-metrics").open = state.role !== "gateway";
+    runtimeRole = state.role;
+  }
   $("config-status").textContent = state.config_loaded ? "身份已加载" : "尚未加载";
   const phase = {stopped:"未启动",starting:"启动中",running:"运行中",stopping:"停止中",failed:"服务失败"};
-  $("phase").textContent = state.role === "client" ? (state.busy ? "操作进行中" : "等待操作") : phase[state.phase];
+  $("phase").textContent = state.role === "client" ? (state.auth_test?.phase === "running" ? "认证测试中" : state.busy ? "操作进行中" : "等待操作") : phase[state.phase];
   $("phase").classList.toggle("error", state.phase === "failed");
   $("runtime-note").textContent = state.role === "client" ? (state.authenticated ? "最近一次网关双向认证成功；每次请求独立建连。" : "连接测试执行 SM2 双向认证，不仅检查端口连通。") : state.role === "adapter" ? (state.model_verified ? "本次运行已有模型请求完成。" : "服务监听就绪不代表模型服务已验证。") : "展示本角色进程的会话、审计与转发状态。";
   $("metrics").replaceChildren();
   const m = state.metrics || {};
-  if (state.role !== "client") {
+  if (state.role === "client") {
+    metric("身份配置", state.config_loaded ? "已加载" : "未加载");
+    metric("当前操作", state.busy ? "进行中" : "空闲");
+    metric("最近一次安全握手", state.authenticated ? "成功" : "尚未成功 / 已重置");
+    metric("最近推理", {idle:"尚未请求",running:"进行中",completed:"已完成",failed:"失败",cancelled:"已取消"}[state.request_phase] || "尚未请求");
+    metric("认证测试成功（本进程）", state.auth_test_totals?.success || 0);
+    metric("认证测试失败（本进程）", state.auth_test_totals?.failed || 0);
+    renderAuthTest(state.auth_test);
+  } else {
     const labels = {active_sessions:"活跃安全会话", pending_sessions:"待认证会话", requests_inflight:"推理进行中", requests_completed_total:"请求完成", requests_failed_total:"请求失败", requests_cancelled_total:"请求取消", handshake_success_total:"入站认证成功", handshake_failure_total:"入站认证失败", authenticated_sessions_total:"网关认证成功", audit_healthy:"审计健康", integrity_failure_total:"完整性拒绝", replay_rejected_total:"重放拒绝"};
     for (const [key,label] of Object.entries(labels)) if (key in m && !(state.role === "gateway" && key === "authenticated_sessions_total")) metric(label, key === "audit_healthy" ? (m[key] ? "正常" : "异常") : m[key]);
+    if (!$("metrics").children.length) metric("运行指标", "启动服务后显示");
   }
   if (state.error) notice(message(state.error));
   if (currentId && state.request_id === currentId && state.request_phase !== "idle") resultStatus(state.request_phase);
   renderConnections(state.connections);
   renderSimulation(state.simulation);
   controls();
+}
+function renderAuthTest(test = {}) {
+  const phase = test.phase || "idle";
+  $("auth-test-result").dataset.phase = phase;
+  $("auth-test-title").textContent = {idle:"尚未测试网关认证",running:"正在测试网关认证…",success:"网关双向认证成功",failed:"网关认证失败",cancelled:"认证测试已取消"}[phase] || "尚未测试网关认证";
+  $("auth-test-message").textContent = {
+    idle:"点击“测试网关认证”验证当前客户端与网关的双向身份。",
+    running:"正在建立安全会话并校验双方身份，请等待测试完成。",
+    success:"已完成安全握手，测试连接随后关闭。此结果仅验证客户端到网关；模型服务需通过发送推理请求验证。",
+    failed:errors.connection_failed,
+    cancelled:"本次测试已中止，可重新点击“测试网关认证”。"
+  }[phase] || "";
+  const meta = [];
+  if (test.target_id) meta.push(`测试目标：${test.target_id} · ${test.target_host}:${test.target_port}`);
+  if (test.finished_at) meta.push("完成时间：" + new Date(test.finished_at).toLocaleString("zh-CN", {hour12:false}));
+  if (test.duration_ms !== undefined) meta.push(`总耗时：${test.duration_ms} ms`);
+  $("auth-test-meta").textContent = meta.join(" ｜ ");
+  $("auth-test-meta").hidden = !meta.length;
 }
 const connectionLabels = {handshaking:"握手中",active:"已认证",closed:"已关闭",authentication_failed:"认证失败",protocol_rejected:"协议拒绝",timeout:"超时",capacity:"容量拒绝",stopped:"服务停止",failed:"连接失败"};
 function cells(row, values) {

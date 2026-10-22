@@ -3,6 +3,8 @@
 import asyncio
 import json
 import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from aiohttp import ClientSession, WSServerHandshakeError
@@ -12,6 +14,116 @@ from gateway.cli import main
 from gateway.contracts import PeerRole
 from gateway.webui.server import CONTROLLER, create_app
 from gateway.webui.settings import Settings
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "failed", "cancelled"])
+async def test_auth_test_result_lifecycle(outcome, tmp_path, monkeypatch):
+    from gateway.webui.controller import Controller
+
+    controller = Controller(PeerRole.CLIENT, tmp_path / "client.json")
+    controller.settings = Settings(str(controller.path), target_id="gateway")
+    session = SimpleNamespace(close=AsyncMock())
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def open_session(target):
+        entered.set()
+        await release.wait()
+        if outcome == "failed":
+            raise RuntimeError("private-error-must-not-reach-page")
+        return session
+
+    manager = SimpleNamespace(open=AsyncMock(side_effect=open_session), close=AsyncMock())
+    runtime = SimpleNamespace(target=object(), manager=manager)
+    monkeypatch.setattr(controller, "new_runtime", lambda: runtime)
+    await controller.test_connection()
+    async with asyncio.timeout(3):
+        await entered.wait()
+    pending = controller.snapshot()
+    assert pending["busy"] is True
+    assert pending["auth_test"]["phase"] == "running"
+    assert pending["auth_test"]["target_id"] == "gateway"
+    if outcome == "cancelled":
+        controller.operation.cancel()
+    release.set()
+    await asyncio.gather(controller.operation, return_exceptions=True)
+    state = controller.snapshot()
+    assert state["auth_test"]["phase"] == outcome
+    assert state["auth_test"]["duration_ms"] >= 0
+    assert state["auth_test"]["finished_at"]
+    assert state["busy"] is False
+    assert state["authenticated"] is (outcome == "success")
+    assert state["auth_test_totals"] == {
+        "success": int(outcome == "success"),
+        "failed": int(outcome == "failed"),
+    }
+    assert "private-error" not in json.dumps(state)
+    manager.close.assert_awaited_once()
+    assert session.close.await_count == int(outcome == "success")
+    # 快照与历史测试结果独立；推理认证状态变化不覆盖测试结果。
+    controller.authenticated = not controller.authenticated
+    assert controller.snapshot()["auth_test"] == state["auth_test"]
+    monkeypatch.setattr(
+        "gateway.webui.controller.load_settings",
+        AsyncMock(return_value=(controller.settings, [])),
+    )
+    await controller.load(controller.path)
+    assert controller.snapshot()["auth_test"] == {"phase": "idle"}
+    assert controller.snapshot()["auth_test_totals"] == state["auth_test_totals"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("started", [False, True])
+@pytest.mark.parametrize("shutdown", [False, True])
+async def test_auth_test_cancel_before_or_during_handshake(
+    started, shutdown, tmp_path, monkeypatch
+):
+    from gateway.webui.controller import Controller
+
+    controller = Controller(PeerRole.CLIENT, tmp_path / "client.json")
+    controller.settings = Settings(str(controller.path), target_id="gateway")
+    entered = asyncio.Event()
+
+    async def open_session(target):
+        entered.set()
+        await asyncio.Event().wait()
+
+    manager = SimpleNamespace(open=AsyncMock(side_effect=open_session), close=AsyncMock())
+    runtime = SimpleNamespace(target=object(), manager=manager)
+    monkeypatch.setattr(controller, "new_runtime", lambda: runtime)
+    queue = asyncio.Queue()
+    controller.sockets["observer"] = queue
+    await controller.test_connection()
+    if started:
+        async with asyncio.timeout(3):
+            await entered.wait()
+    if shutdown:
+        await controller.close()
+    else:
+        await controller.cancel()
+    state = controller.snapshot()
+    assert state["busy"] is False
+    assert state["authenticated"] is False
+    assert state["auth_test"]["phase"] == "cancelled"
+    assert state["auth_test"]["duration_ms"] >= 0
+    assert state["auth_test"]["finished_at"]
+    assert state["auth_test"]["target_id"] == "gateway"
+    assert state["auth_test_totals"] == {"success": 0, "failed": 0}
+    assert manager.open.await_count == int(started)
+    assert manager.close.await_count >= 1
+    while not queue.empty():
+        pushed = queue.get_nowait()
+    assert pushed["state"] == state
+    await controller.cancel()
+    assert controller.snapshot()["auth_test"] == state["auth_test"]
+    session = SimpleNamespace(close=AsyncMock())
+    manager.open.side_effect = None
+    manager.open.return_value = session
+    await controller.test_connection()
+    await controller.operation
+    assert controller.snapshot()["auth_test"]["phase"] == "success"
+    assert controller.snapshot()["auth_test_totals"] == {"success": 1, "failed": 0}
+    session.close.assert_awaited_once()
 
 
 @pytest.mark.parametrize("role,port", [("client", 18080), ("gateway", 18081), ("adapter", 18082)])

@@ -9,6 +9,7 @@ from collections import deque
 from contextlib import aclosing
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from uuid import UUID, uuid4
 
 from gateway.adapter import DEFAULT_MODEL
@@ -60,6 +61,10 @@ class Controller:
         self.request_id: UUID | None = None
         self.request_phase = "idle"
         self.authenticated = False
+        self.auth_test: dict[str, object] = {"phase": "idle"}
+        self._auth_test_started = 0.0
+        self.auth_test_successes = 0
+        self.auth_test_failures = 0
         self.runtime: Runtime | None = None
         self.status = RuntimeStatus()
         self.service: asyncio.Task[None] | None = None
@@ -94,6 +99,11 @@ class Controller:
             "request_id": str(self.request_id) if self.request_id else None,
             "request_phase": self.request_phase,
             "authenticated": self.authenticated,
+            "auth_test": dict(self.auth_test),
+            "auth_test_totals": {
+                "success": self.auth_test_successes,
+                "failed": self.auth_test_failures,
+            },
             "model_verified": self.status.adapter.completed > 0,
             "metrics": self.status.snapshot(self.runtime) if self.runtime else {},
             "default_model": DEFAULT_MODEL,
@@ -226,6 +236,7 @@ class Controller:
                     raise ControlError("config_invalid") from None
             self.error = None
             self.authenticated = False
+            self.auth_test = {"phase": "idle"}
             self.changed()
 
     async def save(self, data: object) -> None:
@@ -241,6 +252,7 @@ class Controller:
                 raise ControlError("config_invalid") from None
             self.settings, self.peers, self.error = settings, peers, None
             self.authenticated = False
+            self.auth_test = {"phase": "idle"}
             self.changed()
 
     def new_runtime(self, *, disable_resumption: bool = False) -> Runtime:
@@ -344,6 +356,15 @@ class Controller:
             runtime = self.new_runtime()
             self.operation_runtime = runtime
             self.authenticated, self.error = False, None
+            assert self.settings is not None
+            self._auth_test_started = perf_counter()
+            self.auth_test = {
+                "phase": "running",
+                "started_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "target_id": self.settings.target_id,
+                "target_host": self.settings.target_host,
+                "target_port": self.settings.target_port,
+            }
             self.operation = asyncio.create_task(self._test(runtime))
             self.changed()
 
@@ -354,17 +375,30 @@ class Controller:
             assert runtime.target is not None
             session = await runtime.manager.open(runtime.target)
             self.authenticated = True
+            self.auth_test["phase"] = "success"
+            self.auth_test_successes += 1
             LOGGER.info("client_authenticated")
         except asyncio.CancelledError:
+            self.auth_test["phase"] = "cancelled"
             raise
         except Exception:
             self.error = "connection_failed"
+            self.auth_test["phase"] = "failed"
+            self.auth_test_failures += 1
             LOGGER.error("client_failed")
         finally:
-            if session:
-                await session.close()
-            await runtime.manager.close()
-            asyncio.get_running_loop().call_soon(self.changed)
+            try:
+                if session:
+                    await session.close()
+            finally:
+                try:
+                    await runtime.manager.close()
+                finally:
+                    self.auth_test["duration_ms"] = round(
+                        (perf_counter() - self._auth_test_started) * 1000
+                    )
+                    self.auth_test["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+                    asyncio.get_running_loop().call_soon(self.changed)
 
     async def infer(self, data: object) -> UUID:
         async with self.lock:
@@ -594,6 +628,13 @@ class Controller:
                 if self.operation_runtime:
                     # 任务可能尚未进入协程体，不能仅依赖其 finally 回收运行对象。
                     await self.operation_runtime.manager.close()
+                if self.auth_test["phase"] == "running":
+                    # 创建后立即取消的任务不会执行 _test 的异常处理或 finally。
+                    self.auth_test["phase"] = "cancelled"
+                    self.auth_test["duration_ms"] = round(
+                        (perf_counter() - self._auth_test_started) * 1000
+                    )
+                    self.auth_test["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
                 if self.request_phase == "running":
                     self.request_phase = "cancelled"
                 if self.simulation and self.simulation.phase == "running":

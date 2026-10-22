@@ -55,6 +55,7 @@
     <section class="card">
       <div class="section-heading"><div><span class="eyebrow">02 / RUNTIME</span><h2 id="runtime-title">运行状态</h2></div><span id="phase" class="badge">未启动</span></div>
       <div class="actions"><button id="test" class="client-only secondary">测试网关认证</button><button id="start" class="server-only primary">启动本角色服务</button><button id="stop-service" class="server-only secondary">停止服务</button><span id="runtime-note" class="muted"></span></div>
+      <div id="auth-test-result" class="client-only auth-test-result" role="status" aria-live="polite" aria-atomic="true" hidden><strong id="auth-test-title">尚未测试网关认证</strong><p id="auth-test-message">点击“测试网关认证”验证当前客户端与网关的双向身份。</p><p id="auth-test-meta" class="muted"></p></div>
       <details id="runtime-metrics"><summary>运行指标详情</summary><div id="metrics" class="metrics"></div></details>
     </section>
     <section class="card gateway-only" hidden>
