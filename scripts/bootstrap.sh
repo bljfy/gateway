@@ -4,12 +4,14 @@ set -euo pipefail
 task_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$task_root"
 task_skip_checks=false
-if [[ "${1:-}" == "--skip-checks" && $# == 1 ]]; then
-    task_skip_checks=true
-elif [[ $# != 0 ]]; then
-    printf 'Usage: bash scripts/bootstrap.sh [--skip-checks]\n' >&2
-    exit 2
-fi
+task_prepare_native=false
+for task_option in "$@"; do
+    case "$task_option" in
+        --skip-checks) task_skip_checks=true ;;
+        --prepare-native) task_prepare_native=true ;;
+        *) printf 'Usage: bash scripts/bootstrap.sh [--skip-checks] [--prepare-native]\n' >&2; exit 2 ;;
+    esac
+done
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
     printf 'This bootstrap supports Linux x86_64 only.\n' >&2
     exit 2
@@ -34,10 +36,10 @@ export UV_CACHE_DIR="$task_root/.tools/cache"
 export UV_PYTHON_INSTALL_DIR="$task_root/.tools/python"
 "$task_uv" python install --no-bin "$task_python_version"
 "$task_uv" sync --locked --dev
+if [[ ( "$task_skip_checks" == false || "$task_prepare_native" == true ) && ! -f .tools/gmssl/manifest.json ]]; then
+    "$task_uv" run --locked python -m gateway.crypto.build_native
+fi
 if [[ "$task_skip_checks" == false ]]; then
-    if [[ ! -f .tools/gmssl/manifest.json ]]; then
-        "$task_uv" run --locked python -m gateway.crypto.build_native
-    fi
     export GMSSL_LIBRARY="$task_root/.tools/gmssl/lib/libgmssl.so.3.1"
     export GMSSL_SHA256
     GMSSL_SHA256="$("$task_uv" run --locked python -c 'import json; print(json.load(open(".tools/gmssl/manifest.json"))["sha256"])')"

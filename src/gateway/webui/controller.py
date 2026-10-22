@@ -1,7 +1,10 @@
 """每个 UI 进程拥有一个角色；所有控制操作在同一事件循环串行化。"""
 
 import asyncio
+import json
 import logging
+import os
+import tempfile
 from collections import deque
 from contextlib import aclosing
 from datetime import UTC, datetime
@@ -13,7 +16,7 @@ from gateway.client import InferenceClient
 from gateway.codec import encode_request
 from gateway.contracts import InferenceRequest, PeerRole, SecureSession
 from gateway.logging import EventLogger, PrivacyFormatter, set_log_level
-from gateway.runtime import Runtime, RuntimeStatus, run_server
+from gateway.runtime import Runtime, RuntimeStatus, prepare_demo, read_bounded, run_server
 from gateway.webui.manual import ManualLab, OpenOptions
 from gateway.webui.sessions import SessionHistory
 from gateway.webui.settings import Settings, inspect_settings, load_settings, table, text
@@ -113,6 +116,71 @@ class Controller:
             "peers": self.peers,
         }
 
+    @property
+    def credential_file(self) -> Path:
+        return self.path.with_suffix(".webui.credentials.json")
+
+    def credential_names(self) -> list[str]:
+        if self.settings and self.role is PeerRole.ADAPTER:
+            return [s.api_key_env for s in self.settings.adapter_config().service_configs()]
+        return []
+
+    def setup_status(self) -> dict[str, object]:
+        names = self.credential_names()
+        missing = [name for name in names if not os.environ.get(name, "").strip()]
+        return {
+            "identity_ready": self.settings is not None,
+            "can_initialize": not self.path.parent.exists(),
+            "missing_credentials": missing,
+            "credential_names": names,
+            "ready": self.settings is not None and not missing,
+        }
+
+    async def setup(self, data: object) -> None:
+        values = table(data, {"initialize", "api_key", "api_key_env", "persist"})
+        async with self.lock:
+            self.editable()
+            if values.get("initialize") is True:
+                if set(values) != {"initialize"} or self.path.parent.exists():
+                    raise ControlError("setup_exists", 409)
+                if self.path.name != f"{self.role.value}.json":
+                    raise ControlError("config_invalid")
+                try:
+                    prepare_demo(self.path.parent, Path(".tools/gmssl/manifest.json"))
+                except Exception:
+                    raise ControlError("setup_failed") from None
+            else:
+                if self.role is not PeerRole.ADAPTER or self.settings is None:
+                    raise ControlError("config_required")
+                key = text(values.get("api_key"), maximum=4096).strip()
+                name = text(values.get("api_key_env"), maximum=128)
+                if (
+                    not key
+                    or name not in self.credential_names()
+                    or type(values.get("persist", False)) is not bool
+                ):
+                    raise ControlError("request_invalid")
+                if values.get("persist"):
+                    stored = {}
+                    if self.credential_file.exists():
+                        stored = json.loads(read_bounded(self.credential_file, 131072))
+                        if not isinstance(stored, dict):
+                            raise ControlError("config_invalid")
+                    stored[name] = key
+                    fd, temporary = tempfile.mkstemp(dir=self.path.parent)
+                    try:
+                        with os.fdopen(fd, "w", encoding="utf-8") as output:
+                            json.dump(stored, output)
+                        os.chmod(temporary, 0o600)
+                        os.replace(temporary, self.credential_file)
+                    finally:
+                        Path(temporary).unlink(missing_ok=True)
+                os.environ[name] = key
+                self.error = None
+        if values.get("initialize") is True:
+            await self.load(self.path)
+        self.changed()
+
     def event(self, message: str) -> None:
         item: dict[str, object] = {
             "type": "event",
@@ -143,6 +211,19 @@ class Controller:
             except Exception:
                 raise ControlError("config_invalid") from None
             self.path, self.settings, self.peers = path.resolve(), settings, peers
+            if self.role is PeerRole.ADAPTER and self.credential_file.exists():
+                try:
+                    stored = json.loads(read_bounded(self.credential_file, 131072))
+                    if not isinstance(stored, dict):
+                        raise ValueError("invalid credential file")
+                    for name in self.credential_names():
+                        if name in stored:
+                            saved = text(stored[name], maximum=4096)
+                            if not os.environ.get(name, "").strip():
+                                os.environ[name] = saved
+                except Exception:
+                    self.settings = None
+                    raise ControlError("config_invalid") from None
             self.error = None
             self.authenticated = False
             self.changed()

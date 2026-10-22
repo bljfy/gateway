@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import subprocess
 import sys
 from collections.abc import Callable
@@ -139,6 +140,17 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--config", type=Path, help="local identity configuration")
     ui.add_argument("--port", type=_positive_int, help="loopback WebUI port")
     ui.add_argument("--stop-file", type=Path, help="exit gracefully when this file appears")
+    ui.add_argument("--host", default="127.0.0.1", help="WebUI listen IP")
+    ui.add_argument(
+        "--public-origin", default="", help="external HTTPS origin, e.g. https://chat.example.com"
+    )
+    ui.add_argument(
+        "--password-env",
+        default="WEBUI_PASSWORD",
+        help="environment variable holding admin password",
+    )
+    ui.add_argument("--tls-cert", type=Path)
+    ui.add_argument("--tls-key", type=Path)
     ui.set_defaults(func=_webui)
     all_ui = subparsers.add_parser("webui-all", help="start all three local WebUIs and services")
     all_ui.add_argument("--directory", type=Path, default=DEMO_DIRECTORY)
@@ -183,11 +195,27 @@ def _webui(args: argparse.Namespace) -> int:
         args.config or DEMO_DIRECTORY / f"{role.value}.json",
         args.port,
         stop_file=args.stop_file,
+        host=args.host,
+        public_origin=args.public_origin,
+        password_env=args.password_env,
+        tls_cert=args.tls_cert,
+        tls_key=args.tls_key,
     )
     return 0
 
 
 def _webui_all(args: argparse.Namespace) -> int:
+    def stop(_signal: int, _frame: object) -> None:
+        raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, stop)
+    try:
+        return _launch_webuis(args)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _launch_webuis(args: argparse.Namespace) -> int:
     return launch(
         args.directory,
         args.manifest,

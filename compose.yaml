@@ -1,0 +1,31 @@
+services:
+  gateway:
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:18081:8081"
+      - "127.0.0.1:18082:8082"
+    volumes:
+      - gateway-data:/data
+    # Caddy shares this container's network namespace and reaches the loopback WebUIs.
+    environment:
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
+      WEBUI_CLIENT_ORIGIN: ${WEBUI_CLIENT_ORIGIN:-}
+      WEBUI_GATEWAY_ORIGIN: ${WEBUI_GATEWAY_ORIGIN:-}
+      WEBUI_ADAPTER_ORIGIN: ${WEBUI_ADAPTER_ORIGIN:-}
+  web:
+    image: caddy:2.10.2
+    network_mode: service:gateway
+    depends_on:
+      - gateway
+    restart: unless-stopped
+    volumes:
+      - ./deploy/Caddyfile.local:/etc/caddy/Caddyfile:ro
+    # Published ports belong to gateway because the network namespace is shared.
+volumes:
+  gateway-data:

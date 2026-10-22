@@ -43,6 +43,77 @@ def free_ports(values):
             pass
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remote", [False, True])
+async def test_launcher_keeps_setup_available_without_model_key(launcher_setup, tmp_path, remote):
+    directory, manifest, business, ui_ports = launcher_setup
+    stop_file = tmp_path / "setup.stop"
+    environment = os.environ.copy()
+    environment["DEEPSEEK_API_KEY"] = ""
+    environment["WEBUI_PASSWORD"] = "synthetic-remote-password"
+    origins = {}
+    for role in PeerRole:
+        origins[role] = f"https://{role.value}.example.com" if remote else ""
+        environment[f"WEBUI_{role.value.upper()}_ORIGIN"] = origins[role]
+    command = [
+        sys.executable,
+        "-m",
+        "gateway.cli",
+        "webui-all",
+        "--directory",
+        str(directory),
+        "--manifest",
+        str(manifest),
+        "--no-browser",
+        "--stop-file",
+        str(stop_file),
+    ]
+    for role, port in ui_ports.items():
+        command.extend([f"--{role.value}-port", str(port)])
+    with (tmp_path / "setup.log").open("w", encoding="utf-8") as log:
+        process = subprocess.Popen(command, stdout=log, stderr=log, env=environment)
+        try:
+            deadline = time.monotonic() + 25
+            while True:
+                assert process.poll() is None, (tmp_path / "setup.log").read_text()
+                try:
+                    from aiohttp import encode_basic_auth
+
+                    async with ClientSession() as session:
+                        states = {}
+                        for role, port in ui_ports.items():
+                            headers = {"X-WebUI-Request": "1"}
+                            if remote:
+                                headers.update(
+                                    Host=f"{role.value}.example.com",
+                                    Origin=origins[role],
+                                    Authorization=encode_basic_auth(
+                                        "admin", environment["WEBUI_PASSWORD"]
+                                    ),
+                                )
+                            async with session.get(
+                                f"http://127.0.0.1:{port}/api/state", headers=headers
+                            ) as response:
+                                states[role] = await response.json()
+                        if all(s.get("config_loaded") for s in states.values()):
+                            assert states[PeerRole.ADAPTER]["phase"] == "stopped"
+                            assert states[PeerRole.GATEWAY]["phase"] == "running"
+                            break
+                except OSError:
+                    pass
+                assert time.monotonic() < deadline
+                await asyncio.sleep(0.1)
+        finally:
+            stop_file.touch()
+            try:
+                await asyncio.to_thread(process.wait, 25)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(5)
+    assert process.returncode == 0
+    free_ports([*business, *ui_ports.values()])
+
+
 def test_launcher_rejects_occupied_ui_without_initializing(tmp_path):
     with socket.create_server(("127.0.0.1", 0)) as listener:
         occupied = listener.getsockname()[1]

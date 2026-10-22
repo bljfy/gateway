@@ -1,12 +1,12 @@
-# 三角色本地 WebUI
+# 三角色 WebUI
 
-客户端、网关与推理 adapter 各有独立中文页面。每个页面管理该进程的配置和状态，不集中远程控制其他角色。适用于可信实验主机，无登录、模型多轮上下文或聊天记录持久化；网关可查看本次 WebUI 进程内限量保留的单轮对话。
+客户端、网关与推理 adapter 各有独立中文页面。每个页面管理该进程的配置和状态，不集中远程控制其他角色。提供本机访问和带管理员认证的 HTTPS 远程访问，不提供模型多轮上下文或聊天记录持久化；网关可查看本次 WebUI 进程内限量保留的单轮对话。
 
 ## 启动与操作
 
 ### 一键启动
 
-Windows 首次完成 `scripts/bootstrap.ps1`，在项目根目录 `.env` 配置模型凭据后，双击根目录 `start.cmd`。启动脚本使用本地 uv 同步锁定依赖，首次生成 `.tools/demo` 身份配置，依次启动 adapter、网关和客户端的独立 WebUI 进程，自动启动 adapter／网关业务服务，等待就绪后打开三个页面。
+Windows 双击根目录 `start.cmd`；缺少运行环境时自动执行安装准备，首次需要联网、CMake 和 C 编译器。也可使用 [容器启动](getting_started.md)，由镜像构建环境提供编译工具。启动脚本使用本地 uv 同步锁定依赖，首次生成 `.tools/demo` 身份配置，依次启动 adapter、网关和客户端的独立 WebUI 进程，配置就绪后自动启动 adapter／网关业务服务，等待就绪后打开三个页面；没有 API Key 时保留 Adapter 配置页面供首次设置。
 
 ```powershell
 # 一键启动
@@ -32,7 +32,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1 -NoBrowser
 .\.venv\Scripts\guomi-gateway.exe webui --role adapter --config .tools/demo/adapter.json
 ```
 
-Linux 使用 `.venv/bin/guomi-gateway`。不指定 `--config` 时读取 `.tools/demo/<角色>.json`；`--port` 可指定 UI 端口。UI 只绑定 `127.0.0.1`，分别在本机打开：
+Linux 使用 `.venv/bin/guomi-gateway`。不指定 `--config` 时读取 `.tools/demo/<角色>.json`；`--port` 可指定 UI 端口。UI 默认绑定 `127.0.0.1`，分别在本机打开：
 
 | 角色 | 浏览器地址 | 页面能力 |
 | --- | --- | --- |
@@ -103,15 +103,15 @@ Markdown 使用随包本地分发的 markdown-it，禁用原始 HTML，危险链
 
 运行层以可选的进程内观察回调把准确的连接／请求关联交给 WebUI，CLI 不启用该回调。业务内容不经日志或审计传递，也不加入常规 state、事件或 WebSocket 广播；仅网关页面主动请求受同源保护的会话详情接口时返回正文。检索片段不复制到会话历史。连接与对话各最多保留 128 条，每条对话的问题与回答合计最多 65536 字符，超限显示截断提示。容量满时先淘汰最早的已结束记录；若全部仍在线则不再记录新条目，不影响转发。列表数量为当前保留记录数量，累计计数见运行指标。
 
-历史仅保留在本次 WebUI 进程内存，刷新页面、停止／重启业务服务后仍可查看，退出 WebUI 后清空，无法恢复引入本功能之前的对话。该能力允许可信本机网关操作者查看业务正文，仍需遵守下述回环访问边界。
+历史仅保留在本次 WebUI 进程内存，刷新页面、停止／重启业务服务后仍可查看，退出 WebUI 后清空，无法恢复引入本功能之前的对话。该能力允许可信本机网关操作者查看业务正文，远程访问同样需要管理员认证和同源校验。
 
-页面可填写本机配置文件路径，加载已有身份。只允许选择文件内已信任的目标身份；地址使用 IPv4／IPv6 字面量，端口为 1–65535。客户端选 gateway，网关选 adapter；页面不能生成身份、添加公钥、停用认证或修改信任有效期。手动实验的替代密钥只存在于独立运行对象。
+页面可填写本机配置文件路径，加载已有身份。只允许选择文件内已信任的目标身份；地址使用 IPv4／IPv6 字面量，端口为 1–65535。客户端选 gateway，网关选 adapter；首次引导可在尚不存在的身份目录创建一套相互信任的三方演示身份；已有目录不会被覆盖。页面不能追加信任公钥、停用认证或修改信任有效期。手动实验的替代密钥只存在于独立运行对象。
 
 保存设置前校验角色、原生库、身份和字段，写入身份 JSON 同目录的 `<文件名去扩展名>.webui.json`，原子替换。旁文件仅保存身份配置路径及本角色非敏感端点参数，加入 Git 忽略规则；原 JSON、TOML、密钥与口令文件保持原样。重新打开 UI 或加载同一配置时恢复旁文件。旁文件损坏时拒绝加载；人工移走损坏旁文件后可恢复原配置。模型 URL 沿用 AdapterConfig：远端必须 HTTPS，无 URL 凭据、查询或片段；回环 HTTP 仅用于测试。
 
-服务运行或客户端操作期间禁止加载／保存配置。停止服务后允许修改；每次启动、连接测试与推理重新加载原身份配置并应用旁文件覆盖，创建新的运行对象。外部修改信任文件会在下一次创建运行对象时生效。`.env` 只在 WebUI 命令启动时读取当前目录；修改凭据需重新启动 WebUI 进程，页面停止／启动业务服务不会重新读取 `.env`。
+服务运行或客户端操作期间禁止加载／保存配置。停止服务后允许修改；每次启动、连接测试与推理重新加载原身份配置并应用旁文件覆盖，创建新的运行对象。外部修改信任文件会在下一次创建运行对象时生效。`.env` 在 WebUI 命令启动时读取当前目录。也可在 Adapter 的“配置引导”中选择已配置的凭据变量并输入 API Key，停止服务后保存即可立即生效。勾选保存时写入身份目录的 `adapter.webui.credentials.json`，新进程加载配置时读取；非空进程环境变量优先。凭据文件包含明文 API Key，和私钥一起限制访问、备份。
 
-adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compatible 服务；每项填写唯一名称、地址和凭据环境变量名，最多 16 项。请求按相同权重轮询到单个服务，故障不会触发自动重试。API Key 只在 adapter 进程启动时读取。单服务 `base_url` 与 `api_key_env` 设置继续可用；服务数组留空时使用它们。
+adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compatible 服务；每项填写唯一名称、地址和凭据环境变量名，最多 16 项。请求按相同权重轮询到单个服务，故障不会触发自动重试。API Key 可在停止 Adapter 服务后通过配置引导更新。单服务 `base_url` 与 `api_key_env` 设置继续可用；服务数组留空时使用它们。
 
 客户端 UI 同时仅允许一个操作，每次请求拥有独立安全会话和 UUID。停止生成、关闭页面、WebSocket 断开、超时或截断均回收请求及会话，局部输出显示未完成。业务输出只发送给发起请求的页面，其他页面只收到状态与脱敏事件。网关／adapter 页面关闭不停止业务服务。页面按钮重复启停保持幂等；退出 WebUI 进程时关闭其拥有的业务服务、会话、provider 和审计任务。强制终止进程不保证完成审计排空，应先通过页面停止服务，再正常退出。
 
@@ -127,22 +127,37 @@ adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compati
 | 网关 `.20` | http://127.0.0.1:18081 | 监听 `192.168.1.20:18443`，已信任 adapter，目标 `192.168.1.30:19443` |
 | adapter `.30` | http://127.0.0.1:18082 | 监听 `192.168.1.30:19443`，模型地址 `https://api.deepseek.com` |
 
-在可信初始化机器生成一次配套身份，再通过带外安全渠道分发每个角色所需的 JSON、TOML、该角色加密私钥与口令文件。每台主机本地构建／校验原生库，更新自己的 `native_manifest` 路径；不要在三台机器分别独立运行 init-demo 后直接连接，独立生成的公钥不互信。对私钥与口令限制文件权限，原生库和路径配置遵循 [协议说明](protocol.md#原生环境)。实验网络只需允许业务端口 18443、19443；UI 和原指标端口保持回环访问。
+在可信初始化机器生成一次配套身份，再通过带外安全渠道分发每个角色所需的 JSON、TOML、该角色加密私钥与口令文件。每台主机本地构建／校验原生库，更新自己的 `native_manifest` 路径；不要在三台机器分别独立运行 init-demo 后直接连接，独立生成的公钥不互信。对私钥与口令限制文件权限，原生库和路径配置遵循 [协议说明](protocol.md#原生环境)。实验网络只需允许业务端口 18443、19443；原指标端口保持回环访问；远程浏览器访问通过 HTTPS 控制面入口。
 
 启用恢复时，在每台目标主机用实际服务账户创建受限主密钥父目录，再执行 `guomi-gateway session-keys init --config <本机角色.json>` 初始化独立存储。恢复数据库和本地主密钥不随身份分发；Windows DPAPI 文件绑定本机账户。路径、权限及迁移步骤见[会话恢复说明](session_resumption.md)。
 
 ## 安全边界
 
-浏览器到本机 UI 服务使用 HTTP；只有 Python 角色间两段业务连接使用现有 SM2 / SM4-GCM，adapter 到远端模型使用 HTTPS。页面不是浏览器国密实现，也不改变网关可接触业务明文的原安全边界。回环无登录边界不隔离同机恶意进程，不应通过代理暴露 UI。
+本机浏览器默认通过 HTTP 连接回环 UI；公网入口使用 HTTPS，状态推送使用 WSS。只有 Python 角色间两段业务连接使用 SM2 / SM4-GCM，adapter 到模型使用 HTTPS。浏览器不是国密协议终端，WebUI 管理员可操作角色配置和查看相应业务内容。
 
-控制接口校验精确 `Host: 127.0.0.1:<UI端口>`；提供 Origin 时必须同源，写入操作及 WebSocket 必须提供同源 Origin。普通 API 还要求 `X-WebUI-Request: 1`，不启用 CORS。响应禁止缓存、限制脚本与连接为同源、防止被嵌入；静态资源不依赖 CDN。页面和事件不返回私钥、口令或 API Key，不在服务器持久化业务正文。错误返回固定代码，不回显异常全文。
+远程入口必须配置精确的 HTTPS Origin 和至少 16 字符的管理员密码。登录用户名为 `admin`，密码从 `WEBUI_PASSWORD` 读取；整个页面、API、静态文件与 WebSocket 都受认证保护。默认本机模式继续使用回环来源校验。浏览器提供 Origin 时必须精确匹配，写入操作与 WebSocket 必须提供 Origin；普通 API 还需 `X-WebUI-Request: 1`，不启用 CORS，也不信任转发头改变访问地址。响应禁止缓存并限制同源资源及页面嵌入。
 
-## 本地 API
+推荐使用 [公网容器部署步骤](getting_started.md#互联网访问)，其中 Caddy 终结 HTTPS，WebUI 保持回环监听。三个角色分别使用独立域名，不能通过路径前缀挂载。Caddy 的证书申请与续期条件见 [Automatic HTTPS](https://caddyserver.com/docs/automatic-https)，WebSocket 转发见 [reverse_proxy](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。
 
-以下控制接口只用于本机页面，不是国密线协议，也不改变契约 2.0。JSON 请求严格限制字段和类型；HTTP 请求体上限 2 MiB，实际推理仍受编码后 1 MiB 等原业务限额约束。
+已有 HTTPS 代理时也可分别启动角色：
+
+```powershell
+$env:WEBUI_PASSWORD = '<至少16字符的随机密码>'
+.\.venv\Scripts\guomi-gateway.exe webui --role client --public-origin https://chat.example.com
+```
+
+代理需保留原始 Host、Origin、Authorization 和 WebSocket Upgrade，并转发到 `127.0.0.1:18080`。其余角色分别使用端口 18081、18082。`webui-all` 可通过 `WEBUI_CLIENT_ORIGIN`、`WEBUI_GATEWAY_ORIGIN`、`WEBUI_ADAPTER_ORIGIN` 配置三页外部地址。
+
+直接终结 TLS 时使用 `--host 0.0.0.0 --public-origin https://chat.example.com:18080 --tls-cert <证书链.pem> --tls-key <私钥.pem>`；非回环监听没有证书时拒绝启动。证书续期后需重启进程。管理员认证是共享管理入口，当前没有普通用户权限、账号管理或登录撤销；浏览器可能缓存 Basic 认证，修改密码后重启所有相关 WebUI。
+
+## 控制 API
+
+以下控制接口供对应角色页面使用，不是国密线协议，也不改变契约 2.0。JSON 请求严格限制字段和类型；HTTP 请求体上限 2 MiB，实际推理仍受编码后 1 MiB 等原业务限额约束。
 
 | 方法与路径 | 输入／输出 |
 | --- | --- |
+| GET `/api/setup` | 身份就绪、能否创建身份、凭据变量名与缺失项；不返回凭据值 |
+| POST `/api/setup` | `{initialize:true}` 创建尚不存在目录的三方身份；或 Adapter 提交 `{api_key,api_key_env,persist}`，仅允许当前配置引用的变量名 |
 | GET `/api/state` | role、phase、config_loaded、busy、error、最近请求 UUID／阶段、认证结果、数值 metrics |
 | GET `/api/config` | 本角色 settings 与目标候选身份／地址／启用状态，不含信任公钥 |
 | GET `/api/session-keys` | `{count,credentials}`，每项仅含 peer_id、expires_at；存储异常返回错误，不返回秘密或 ticket |
@@ -165,6 +180,6 @@ adapter 设置可通过 `services_json` 编辑多个 DeepSeek 或 OpenAI-compati
 
 role 错误为 404、运行中修改为 409、来源错误为 403、输入错误为 400、非 JSON 请求为 415、超过 HTTP 限额为 413。错误体仅为 `{error:固定代码}`。
 
-state 新增 `connections` 和 `simulation`：网关 connections 含 active、recent、total_active、truncated；客户端 simulation 含 phase、mode、clients，每个 client 含 client、phase、result。连接统计字节只计算已认证记录的明文载荷长度，不是 TCP 线速流量。快照仍仅发给本机控制面。
+state 新增 `connections` 和 `simulation`：网关 connections 含 active、recent、total_active、truncated；客户端 simulation 含 phase、mode、clients，每个 client 含 client、phase、result。连接统计字节只计算已认证记录的明文载荷长度，不是 TCP 线速流量。快照只向通过来源校验和访问认证的控制面连接推送。
 
 手动实验 options 支持 mode（secure／raw）、duration、fault、identity、key_version、expired_trust，以及 signing_private／gateway_signing_public／gateway_encryption_public 替代值。command.action 为 key、restore_key、send、tamper、replay、cross_session、reflect、raw、abort、close；key 使用 key 字段，raw 使用 raw 字段，send／tamper 支持 sequence（十进制字符串）、session_id、direction、record_type、request_id、chunk_index、payload、nonce，tamper 额外支持 offset 和 xor。故障枚举与界面一致。不存在的连接、错误 owner 或已结束连接返回 409，参数错误为 400；接口不接受额外目标地址。state.manual 仅包含阶段、结果、源地址、下一序号、捕获长度、替代密钥状态和脱敏操作记录。

@@ -1,0 +1,19 @@
+services:
+  gateway:
+    environment:
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:?Set an administrator password of at least 16 characters}
+    ports:
+      - "80:80"
+      - "443:443"
+  web:
+    volumes:
+      - ./deploy/Caddyfile.internet:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      WEBUI_CLIENT_ORIGIN: ${WEBUI_CLIENT_ORIGIN:?Set the client HTTPS origin}
+      WEBUI_GATEWAY_ORIGIN: ${WEBUI_GATEWAY_ORIGIN:?Set the gateway HTTPS origin}
+      WEBUI_ADAPTER_ORIGIN: ${WEBUI_ADAPTER_ORIGIN:?Set the adapter HTTPS origin}
+volumes:
+  caddy-data:
+  caddy-config:

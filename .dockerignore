@@ -1,0 +1,12 @@
+.git
+.venv*
+.tools
+.env*
+artifacts
+test
+__pycache__
+*.webui.credentials.json
+*.der
+*.password
+*.sessions
+*.secrets

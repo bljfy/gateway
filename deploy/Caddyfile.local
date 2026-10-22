@@ -1,0 +1,15 @@
+http://:8080 {
+    reverse_proxy 127.0.0.1:18080 {
+        header_up Host 127.0.0.1:18080
+    }
+}
+http://:8081 {
+    reverse_proxy 127.0.0.1:18081 {
+        header_up Host 127.0.0.1:18081
+    }
+}
+http://:8082 {
+    reverse_proxy 127.0.0.1:18082 {
+        header_up Host 127.0.0.1:18082
+    }
+}

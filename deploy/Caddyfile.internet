@@ -1,0 +1,9 @@
+{$WEBUI_CLIENT_ORIGIN} {
+    reverse_proxy 127.0.0.1:18080
+}
+{$WEBUI_GATEWAY_ORIGIN} {
+    reverse_proxy 127.0.0.1:18081
+}
+{$WEBUI_ADAPTER_ORIGIN} {
+    reverse_proxy 127.0.0.1:18082
+}

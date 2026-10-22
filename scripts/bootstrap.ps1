@@ -1,4 +1,4 @@
-param([switch]$SkipChecks)
+param([switch]$SkipChecks, [switch]$PrepareNative)
 
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
@@ -41,12 +41,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Python installation failed.' }
     & $taskUv sync --locked --dev
     if ($LASTEXITCODE -ne 0) { throw 'Dependency sync failed.' }
+    $taskManifestPath = Join-Path $taskTools 'gmssl/manifest.json'
+    if ((-not $SkipChecks -or $PrepareNative) -and -not (Test-Path -LiteralPath $taskManifestPath)) {
+        & $taskUv run --locked python -m gateway.crypto.build_native
+        if ($LASTEXITCODE -ne 0) { throw 'GmSSL build failed; install CMake and a C compiler or prepare the native manifest first.' }
+    }
     if (-not $SkipChecks) {
-        $taskManifestPath = Join-Path $taskTools 'gmssl/manifest.json'
-        if (-not (Test-Path -LiteralPath $taskManifestPath)) {
-            & $taskUv run --locked python -m gateway.crypto.build_native
-            if ($LASTEXITCODE -ne 0) { throw 'GmSSL build failed; install CMake and a C compiler or prepare the native manifest first.' }
-        }
         $taskManifest = Get-Content -LiteralPath $taskManifestPath -Raw | ConvertFrom-Json
         $env:GMSSL_LIBRARY = $taskManifest.library
         $env:GMSSL_SHA256 = $taskManifest.sha256

@@ -36,7 +36,7 @@ bash scripts/bootstrap.sh
 
 Linux 初始化的版本判断回归测试在 Ubuntu CI 中执行。Windows 本地验证该测试时，可将 `GATEWAY_TEST_BASH` 环境变量设为 Git Bash 的 `bash.exe` 绝对路径；未指定时跳过这组测试。测试使用临时目录中的工具替身，不下载或安装软件。
 
-该脚本部署开发环境。完整检查会构建并自测 GmSSL 3.1.1，需要 CMake 和 C 编译器；已有 `.tools/gmssl/manifest.json` 时复用经校验库。`SkipChecks` 仅同步 Python 环境。独立运行 pytest 前须按 [协议文档](protocol.md#原生环境) 设置 DLL 路径、`GMSSL_LIBRARY` 和 `GMSSL_SHA256`；Linux 另需 `LD_LIBRARY_PATH`。本地服务配置与密钥生成见 [使用说明](usage.md)，回滚见 [部署说明](deployment.md)，生产发布条件见 [CI/CD 规范](ci_cd.md)。
+该脚本部署开发环境。完整检查会构建并自测 GmSSL 3.1.1，需要 CMake 和 C 编译器；已有 `.tools/gmssl/manifest.json` 时复用经校验库。`SkipChecks` 仅同步 Python 环境；同时指定 Windows 的 `-PrepareNative` 或 Linux 的 `--prepare-native` 会准备原生库但不执行 Python 检查套件，一键启动脚本使用此组合。独立运行 pytest 前须按 [协议文档](protocol.md#原生环境) 设置 DLL 路径、`GMSSL_LIBRARY` 和 `GMSSL_SHA256`；Linux 另需 `LD_LIBRARY_PATH`。本地服务配置与密钥生成见 [使用说明](usage.md)，回滚见 [部署说明](deployment.md)，生产发布条件见 [CI/CD 规范](ci_cd.md)。
 
 环境准备后，在 adapter/demo 终端设置 DEEPSEEK_API_KEY，再运行 Windows 的 `.\.venv\Scripts\guomi-gateway.exe demo` 或 Linux 的 `.venv/bin/guomi-gateway demo`，完成一次真实安全链路演示。Linux 仍需设置原生库加载路径；提示词、流式输出和独立服务启动见 [使用说明](usage.md)。
 

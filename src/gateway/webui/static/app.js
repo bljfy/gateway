@@ -1,10 +1,35 @@
 "use strict";
 const $ = id => document.getElementById(id);
 const titles = {client: "客户端 · 推理操作台", gateway: "网关 · 安全控制台", adapter: "Adapter · 推理服务台"};
-const errors = {config_invalid:"配置校验失败。请检查本地文件、角色、身份、原生库及连接参数。", config_required:"请先加载本地身份配置。", busy:"当前有任务或服务正在运行，请先停止。", service_failed:"服务启动或运行失败。请检查端口占用、凭据、审计目录和本地配置。", connection_failed:"网关认证失败。请检查目标地址、信任公钥、有效期和对端服务。", inference_failed:"推理未完成。请检查网关与 Adapter 状态、模型凭据或超时设置。", request_invalid:"请求参数无效或超过限额。", socket_required:"页面连接已断开，请等待重新连接后再发送。", origin_rejected:"本地来源校验失败，请使用启动时显示的 127.0.0.1 地址。", request_mismatch:"请求已变化，请刷新状态后重试。", capacity_rejected:"页面连接数量已达上限。", request_too_large:"请求体过大，请缩短提示词或检索片段。"};
+const errors = {setup_failed:"身份初始化失败。请检查 GmSSL 原生库清单和目录权限；修复后加载配置，或使用新的身份目录。", setup_exists:"身份目录已存在，请加载已有配置。", config_invalid:"配置校验失败。请检查本地文件、角色、身份、原生库及连接参数。", config_required:"请先加载本地身份配置。", busy:"当前有任务或服务正在运行，请先停止。", service_failed:"服务启动或运行失败。请检查端口占用、凭据、审计目录和本地配置。", connection_failed:"网关认证失败。请检查目标地址、信任公钥、有效期和对端服务。", inference_failed:"推理未完成。请检查网关与 Adapter 状态、模型凭据或超时设置。", request_invalid:"请求参数无效或超过限额。", socket_required:"页面连接已断开，请等待重新连接后再发送。", origin_rejected:"访问地址校验失败，请使用部署时配置的完整地址。", request_mismatch:"请求已变化，请刷新状态后重试。", capacity_rejected:"页面连接数量已达上限。", request_too_large:"请求体过大，请缩短提示词或检索片段。"};
 let state = {}, settings = {}, peers = [], owner = null, currentId = null;
 let dirty = false, actionBusy = false, socket = null, closing = false, submitting = false;
 let answer = null, answerFrame = null;
+async function setupGuide(force = false) {
+  const setup = await api("setup");
+  $("setup-guide").hidden = setup.ready && !force;
+  $("setup-summary").textContent = !setup.identity_ready
+    ? (setup.can_initialize ? "首次运行，请创建配套身份配置。" : "身份配置未能加载。请在下方检查服务器上的配置路径；已有身份目录需要修复，不能覆盖生成。")
+    : (setup.ready ? "配置已就绪。可按以下步骤检查服务；更新 API Key 前请先停止 Adapter 服务。" : "身份已准备好，请填写模型 API Key。服务地址可在下方连接配置中修改。");
+  $("setup-initialize").hidden = !setup.can_initialize;
+  $("setup-key-fields").hidden = !setup.identity_ready || state.role !== "adapter";
+  $("setup-key-name").replaceChildren(...setup.credential_names.map(name => {
+    const option = document.createElement("option"); option.value = name;
+    option.textContent = name + (setup.missing_credentials.includes(name) ? " · 待填写" : " · 已配置"); return option;
+  }));
+}
+$("setup-refresh").onclick = () => action(() => setupGuide(true));
+$("setup-show").onclick = () => action(() => setupGuide(true));
+$("setup-initialize").onclick = () => action(async () => {
+  await api("setup", "POST", {initialize:true});
+  render(await api("state")); fill(await api("config")); await setupGuide();
+});
+$("setup-save-key").onclick = () => action(async () => {
+  const key = $("setup-key").value; $("setup-key").value = "";
+  await api("setup", "POST", {api_key:key, api_key_env:$("setup-key-name").value, persist:$("setup-persist").checked});
+  await setupGuide(); render(await api("state"));
+  notice("API Key 已保存。请启动 Adapter，再到客户端测试认证并发送问题。");
+});
 
 function renderAnswer(immediate = false) {
   if (immediate && answerFrame !== null) { cancelAnimationFrame(answerFrame); answerFrame = null; }
@@ -44,6 +69,8 @@ function controls() {
   const locked = running || state.busy || actionBusy;
   document.querySelectorAll(".config-card input,.config-card select,.config-card textarea").forEach(el => {el.disabled = !!locked;});
   $("load").disabled = !!locked;
+  $("setup-initialize").disabled = !!locked;
+  $("setup-save-key").disabled = !!locked;
   $("save").disabled = !!locked || !state.config_loaded;
   $("test").disabled = !!locked || !state.config_loaded;
   $("start").disabled = !!locked || !state.config_loaded;
@@ -153,7 +180,7 @@ function resultStatus(phase) {
   $("result-status").classList.toggle("error", ["failed","cancelled"].includes(phase));
 }
 function connect() {
-  socket = new WebSocket("ws://" + location.host + "/api/ws");
+  socket = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/api/ws");
   socket.onmessage = e => {
     const item = JSON.parse(e.data);
     if (item.type === "ready") {
@@ -175,8 +202,8 @@ function connect() {
     controls(); if (!closing) setTimeout(connect, 2000);
   };
 }
-$("load").onclick = () => action(async () => {fill(await api("config/load", "POST", {config_path:$("config_path").value})); render(await api("state")); notice("配置已加载。可修改连接参数并保存。");});
-$("save").onclick = () => action(async () => {fill(await api("config", "PUT", configuration())); notice("连接设置已保存。");});
+$("load").onclick = () => action(async () => {fill(await api("config/load", "POST", {config_path:$("config_path").value})); render(await api("state")); await setupGuide(); notice("配置已加载。可修改连接参数并保存。");});
+$("save").onclick = () => action(async () => {fill(await api("config", "PUT", configuration())); await setupGuide(); notice("连接设置已保存。");});
 $("start").onclick = () => action(async () => {configured(); render(await api("start", "POST"));});
 $("stop-service").onclick = () => action(async () => {render(await api("stop", "POST"));});
 $("test").onclick = () => action(async () => {configured(); render(await api("test", "POST"));});
@@ -212,4 +239,4 @@ document.querySelectorAll(".config-card input,.config-card select,.config-card t
 $("target_id").addEventListener("change", () => {const peer = peers.find(p=>p.peer_id === $("target_id").value); if (peer && peer.host) {$("target_host").value = peer.host; $("target_port").value = peer.port;} dirty = true; controls();});
 window.addEventListener("beforeunload", () => {closing = true; socket?.close(); GatewaySessions.close();});
 ManualUI.initialize({api, action, configured, render, owner:()=>owner, resetRequest:()=>{currentId = null;}});
-action(async () => {render(await api("state")); fill(await api("config")); connect();});
+action(async () => {render(await api("state")); fill(await api("config")); await setupGuide(); connect();});

@@ -1,5 +1,6 @@
 """一键启动已有三角色控制台，退出时仅清理本次创建的进程。"""
 
+import base64
 import http.client
 import json
 import os
@@ -16,13 +17,21 @@ from gateway.contracts import GatewayError, PeerRole
 from gateway.runtime import prepare_demo
 
 
-def api(port: int, path: str, *, start: bool = False) -> dict[str, object]:
+def api(port: int, path: str, *, start: bool = False, public_origin: str = "") -> dict[str, object]:
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
     try:
+        headers = {"Origin": f"http://127.0.0.1:{port}", "X-WebUI-Request": "1"}
+        if public_origin:
+            from urllib.parse import urlsplit
+
+            headers["Origin"] = public_origin
+            headers["Host"] = urlsplit(public_origin).netloc
+            token = base64.b64encode(f"admin:{os.environ.get('WEBUI_PASSWORD', '')}".encode())
+            headers["Authorization"] = "Basic " + token.decode()
         connection.request(
             "POST" if start else "GET",
             f"/api/{path}",
-            headers={"Origin": f"http://127.0.0.1:{port}", "X-WebUI-Request": "1"},
+            headers=headers,
         )
         response = connection.getresponse()
         data = json.loads(response.read(65536))
@@ -66,6 +75,7 @@ def launch(
     with TemporaryDirectory(prefix="launcher-", dir=directory) as temporary:
         try:
             for role in (PeerRole.ADAPTER, PeerRole.GATEWAY, PeerRole.CLIENT):
+                origin = os.environ.get(f"WEBUI_{role.value.upper()}_ORIGIN", "")
                 child_stop = Path(temporary) / f"{role.value}.stop"
                 process = subprocess.Popen(
                     [
@@ -91,7 +101,7 @@ def launch(
                     if process.poll() is not None or time.monotonic() >= deadline:
                         raise GatewayError(f"{role.value} WebUI failed to start")
                     try:
-                        state = api(ports[role], "state")
+                        state = api(ports[role], "state", public_origin=origin)
                     except (OSError, http.client.HTTPException):
                         time.sleep(0.1)
                         continue
@@ -99,10 +109,22 @@ def launch(
                         raise GatewayError(f"{role.value} configuration failed to load")
                     break
                 if role is not PeerRole.CLIENT:
-                    if api(ports[role], "start", start=True).get("phase") != "running":
+                    setup = api(ports[role], "setup", public_origin=origin)
+                    if not setup.get("ready"):
+                        print(
+                            f"{role.value}: open the setup guide to configure model credentials.",
+                            flush=True,
+                        )
+                    elif (
+                        api(ports[role], "start", start=True, public_origin=origin).get("phase")
+                        != "running"
+                    ):
                         raise GatewayError(f"{role.value} service failed to start")
             for role in (PeerRole.CLIENT, PeerRole.GATEWAY, PeerRole.ADAPTER):
-                url = f"http://127.0.0.1:{ports[role]}/"
+                url = (
+                    os.environ.get(f"WEBUI_{role.value.upper()}_ORIGIN")
+                    or f"http://127.0.0.1:{ports[role]}"
+                )
                 print(f"{role.value}: {url}", flush=True)
                 if open_browser:
                     webbrowser.open(url, new=2)

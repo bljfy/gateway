@@ -17,7 +17,13 @@ flowchart LR
 
 握手 v2 支持 Windows/Linux 加密保存恢复秘密、30 分钟内跨连接恢复以及网关上游独占连接池。新演示配置默认启用；已有三端须同步升级，启用、撤销和安全边界见[会话恢复说明](docs/session_resumption.md)。
 
-## 快速开始
+## 图形界面启动
+
+安装并启动 Docker 后，在项目目录执行 `docker compose up -d --build`，打开 [客户端](http://127.0.0.1:18080)、[网关](http://127.0.0.1:18081) 和 [Adapter](http://127.0.0.1:18082)。首次在 Adapter 配置引导填写 API Key 并启动服务，再到客户端测试认证、发送问题。配置和身份保存在数据卷中。
+
+本机启动、公网 HTTPS、停止、备份与常见问题见 [开始使用](docs/getting_started.md)。
+
+## 命令行快速开始
 
 Windows（PowerShell）：
 
@@ -46,9 +52,9 @@ Linux 启动前设置 [原生库加载路径](docs/protocol.md#原生环境)。�
 
 ## 独立程序与直接推理
 
-Windows 双击根目录 `start.cmd`，自动初始化本地身份、启动三角色 WebUI 及 adapter／网关业务服务，并打开三个浏览器页面。先完成 bootstrap，并在根目录 `.env` 配置模型凭据。在启动窗口按 Ctrl+C 统一停止本次启动的服务。端口设置与命令用法见 [一键启动](docs/webui.md#一键启动)。
+Windows 双击根目录 `start.cmd`，自动初始化本地身份、启动三角色 WebUI 及 adapter／网关业务服务，并打开三个浏览器页面。首次自动准备运行环境；也可在 Adapter 的配置引导中填写模型凭据。在启动窗口按 Ctrl+C 统一停止本次启动的服务。端口设置与命令用法见 [一键启动](docs/webui.md#一键启动)。
 
-三个角色各有本地中文 WebUI。先初始化身份，再在各角色的终端运行：
+三个角色各有中文 WebUI。先初始化身份，再在各角色的终端运行：
 
 ```powershell
 .\.venv\Scripts\guomi-gateway.exe webui --role client

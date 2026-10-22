@@ -15,6 +15,7 @@ htmlcov/
 .ruff_cache/
 artifacts/
 *.webui.json
+*.webui.credentials.json
 dist/
 *.egg-info/
 .env

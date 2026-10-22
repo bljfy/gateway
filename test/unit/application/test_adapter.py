@@ -74,7 +74,8 @@ def test_removed_commands_are_rejected(command):
         build_parser().parse_args([command])
 
 
-def test_infer_missing_credential_has_fixed_cli_error(monkeypatch, capsys):
+def test_infer_missing_credential_has_fixed_cli_error(monkeypatch, capsys, tmp_path):
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DEEPSEEK_API_KEY")
     assert main(["infer", "--prompt", "SYNTHETIC_SECRET"]) == 1
     result = capsys.readouterr()

@@ -10,8 +10,10 @@ $taskRoot = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $taskRoot
 $taskCli = Join-Path $taskRoot '.venv\Scripts\guomi-gateway.exe'
 $taskUv = Join-Path $taskRoot '.tools\uv\uv.exe'
-if (-not (Test-Path -LiteralPath $taskCli)) {
-    throw 'Run scripts/bootstrap.ps1 first to prepare Python and GmSSL.'
+if (-not (Test-Path -LiteralPath $taskCli) -or -not (Test-Path -LiteralPath (Join-Path $taskRoot '.tools/gmssl/manifest.json'))) {
+    Write-Host 'Preparing Python, dependencies and GmSSL. The first run needs internet, CMake and a C compiler.'
+    & (Join-Path $PSScriptRoot 'bootstrap.ps1') -SkipChecks -PrepareNative
+    if (-not (Test-Path -LiteralPath $taskCli)) { throw 'Environment preparation failed.' }
 }
 if (Test-Path -LiteralPath $taskUv) {
     $taskPreviousCache = $env:UV_CACHE_DIR

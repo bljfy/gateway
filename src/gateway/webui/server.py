@@ -1,9 +1,15 @@
-"""回环 HTTP 控制面与同源 WebSocket；国密业务通道由运行层建立。"""
+"""HTTP/HTTPS 控制面与同源 WebSocket；国密业务通道由运行层建立。"""
 
 import asyncio
+import base64
+import hmac
+import ipaddress
+import os
+import ssl
 from collections.abc import AsyncIterator
 from importlib.resources import files
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from aiohttp import web
@@ -20,6 +26,8 @@ from gateway.webui.settings import table, text
 
 DEFAULT_PORTS = {PeerRole.CLIENT: 18080, PeerRole.GATEWAY: 18081, PeerRole.ADAPTER: 18082}
 CONTROLLER = web.AppKey("controller", Controller)
+ORIGIN = web.AppKey("public_origin", str)
+PASSWORD = web.AppKey("password", str)
 SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
@@ -34,18 +42,35 @@ SECURITY_HEADERS = {
 async def boundary(request: web.Request, handler: Handler) -> web.StreamResponse:
     transport = request.transport
     address = transport.get_extra_info("sockname") if transport else None
-    expected_host = f"127.0.0.1:{address[1]}" if address else ""
+    local_host = f"[{address[0]}]" if address and ":" in address[0] else "127.0.0.1"
+    expected_origin = request.app.get(ORIGIN) or (
+        f"http://{local_host}:{address[1]}" if address else ""
+    )
+    expected_host = urlsplit(expected_origin).netloc
     origins = request.headers.getall("Origin", [])
     hosts = request.headers.getall("Host", [])
     valid = hosts == [expected_host] and len(origins) <= 1
-    if origins and origins != [f"http://{expected_host}"]:
+    if origins and origins != [expected_origin]:
         valid = False
     if request.path == "/api/ws" or request.method not in {"GET", "HEAD"}:
-        valid = valid and origins == [f"http://{expected_host}"]
+        valid = valid and origins == [expected_origin]
     if request.path.startswith("/api/") and request.path != "/api/ws":
         valid = valid and request.headers.get("X-WebUI-Request") == "1"
     if not valid:
         return web.json_response({"error": "origin_rejected"}, status=403, headers=SECURITY_HEADERS)
+    password = request.app.get(PASSWORD, "")
+    if password:
+        expected = "Basic " + base64.b64encode(f"admin:{password}".encode()).decode()
+        supplied = request.headers.get("Authorization", "")
+        if not hmac.compare_digest(supplied.encode(), expected.encode()):
+            return web.json_response(
+                {"error": "authentication_required"},
+                status=401,
+                headers={
+                    **SECURITY_HEADERS,
+                    "WWW-Authenticate": 'Basic realm="Gateway", charset="UTF-8"',
+                },
+            )
     try:
         response = await handler(request)
     except ControlError as exc:
@@ -70,12 +95,32 @@ async def body(request: web.Request) -> object:
         raise ControlError("request_invalid") from None
 
 
-def create_app(role: PeerRole, config: Path) -> web.Application:
+def create_app(
+    role: PeerRole, config: Path, *, public_origin: str = "", password: str = ""
+) -> web.Application:
+    if public_origin:
+        parsed = urlsplit(public_origin)
+        # Accessing port also rejects malformed or out-of-range ports.
+        _ = parsed.port
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.path
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("public origin must be an HTTPS origin without a path")
+        if len(password) < 16:
+            raise ValueError("remote WebUI requires a password of at least 16 characters")
     controller = Controller(role, config)
     sockets: set[web.WebSocketResponse] = set()
     cleanups: set[asyncio.Task[None]] = set()
     app = web.Application(middlewares=[boundary], client_max_size=2 * 1024 * 1024)
     app[CONTROLLER] = controller
+    app[ORIGIN] = public_origin
+    app[PASSWORD] = password
 
     async def resource(request: web.Request) -> web.Response:
         name = request.match_info.get("name", "index.html")
@@ -98,6 +143,11 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
 
     async def status(_request: web.Request) -> web.Response:
         return web.json_response(controller.snapshot())
+
+    async def setup(request: web.Request) -> web.Response:
+        if request.method == "POST":
+            await controller.setup(await body(request))
+        return web.json_response(controller.setup_status())
 
     async def configuration(request: web.Request) -> web.Response:
         if request.method == "PUT":
@@ -252,6 +302,8 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
             web.get("/", resource),
             web.get("/static/{name}", resource),
             web.get("/api/state", status),
+            web.get("/api/setup", setup),
+            web.post("/api/setup", setup),
             web.get("/api/config", configuration),
             web.get("/api/sessions", sessions),
             web.get("/api/sessions/{identity}", sessions),
@@ -274,12 +326,20 @@ def create_app(role: PeerRole, config: Path) -> web.Application:
     return app
 
 
-async def serve_until_stop(app: web.Application, port: int, stop_file: Path) -> None:
+async def serve_until_stop(
+    app: web.Application,
+    port: int,
+    stop_file: Path,
+    *,
+    host: str = "127.0.0.1",
+    tls: ssl.SSLContext | None = None,
+) -> None:
     runner = web.AppRunner(app, access_log=None)
     try:
         await runner.setup()
-        await web.TCPSite(runner, "127.0.0.1", port).start()
-        print(f"WebUI: http://127.0.0.1:{port}", flush=True)
+        await web.TCPSite(runner, host, port, ssl_context=tls).start()
+        address = app.get(ORIGIN) or f"http://{host}:{port}"
+        print(f"WebUI: {address}", flush=True)
         while not stop_file.exists():
             await asyncio.sleep(0.1)
     finally:
@@ -287,18 +347,49 @@ async def serve_until_stop(app: web.Application, port: int, stop_file: Path) -> 
 
 
 def run_webui(
-    role: PeerRole, config: Path, port: int | None = None, *, stop_file: Path | None = None
+    role: PeerRole,
+    config: Path,
+    port: int | None = None,
+    *,
+    stop_file: Path | None = None,
+    host: str = "127.0.0.1",
+    public_origin: str = "",
+    password_env: str = "WEBUI_PASSWORD",
+    tls_cert: Path | None = None,
+    tls_key: Path | None = None,
 ) -> None:
+    public_origin = public_origin or os.environ.get(f"WEBUI_{role.value.upper()}_ORIGIN", "")
     chosen = DEFAULT_PORTS[role] if port is None else port
     if type(chosen) is not int or not 1 <= chosen <= 65535:
         raise ValueError("invalid UI port")
+    loopback = ipaddress.ip_address(host).is_loopback
+    if (not loopback or tls_cert is not None) and not public_origin:
+        raise ValueError("remote access requires --public-origin")
+    if bool(tls_cert) != bool(tls_key):
+        raise ValueError("provide both --tls-cert and --tls-key")
+    if not loopback and tls_cert is None:
+        raise ValueError("non-loopback listener requires TLS; use loopback behind an HTTPS proxy")
+    tls = None
+    if tls_cert and tls_key:
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls.load_cert_chain(tls_cert, tls_key)
+    app = create_app(
+        role,
+        config,
+        public_origin=public_origin,
+        password=os.environ.get(password_env, "") if public_origin else "",
+    )
+    display_host = f"[{host}]" if ":" in host else host
+    display_url = public_origin or f"http://{display_host}:{chosen}"
     if stop_file is not None:
-        asyncio.run(serve_until_stop(create_app(role, config), chosen, stop_file))
+        asyncio.run(serve_until_stop(app, chosen, stop_file, host=host, tls=tls))
         return
     web.run_app(
-        create_app(role, config),
-        host="127.0.0.1",
+        app,
+        host=host,
+        ssl_context=tls,
         port=chosen,
         access_log=None,
-        print=lambda _message: print(f"WebUI: http://127.0.0.1:{chosen}", flush=True),
+        print=lambda _message: print(f"WebUI: {display_url}", flush=True),
     )
